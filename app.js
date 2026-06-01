@@ -16,6 +16,7 @@ let state = {
   mainTasks: [],
   templates: [],
   dailyTasks: [],
+  dnfNotes: [],
 };
 let pomodoro = loadPomodoro();
 let pomodoroInterval;
@@ -181,6 +182,7 @@ class DemoStore {
         },
       ],
       dailyTasks: [],
+      dnfNotes: [],
     };
     localStorage.setItem(DEMO_KEY, JSON.stringify(data));
     return data;
@@ -203,6 +205,7 @@ class DemoStore {
       dailyTask.sortOrder ??= index;
     });
     data.dailyTasks = data.dailyTasks.filter((item) => item.taskDate === today());
+    data.dnfNotes ||= [];
     return data;
   }
 
@@ -294,6 +297,17 @@ class DemoStore {
     });
     this.save();
   }
+
+  async createDnfNote(payload) {
+    this.data.dnfNotes ||= [];
+    this.data.dnfNotes.unshift({ id: id(), ...payload, createdAt: new Date().toISOString() });
+    this.save();
+  }
+
+  async deleteDnfNote(noteId) {
+    this.data.dnfNotes = (this.data.dnfNotes || []).filter((item) => item.id !== noteId);
+    this.save();
+  }
 }
 
 class SupabaseStore {
@@ -308,12 +322,13 @@ class SupabaseStore {
   }
 
   async load() {
-    const [mainTasks, templates, dailyTasks] = await Promise.all([
+    const [mainTasks, templates, dailyTasks, dnfNotes] = await Promise.all([
       this.client.from("main_tasks").select("id,title,description,subtasks(id,title,completed,estimated_minutes,step_items(id,title,completed,estimated_minutes))").order("created_at"),
       this.client.from("task_templates").select("id,title,description,template_subtasks(id,title)").order("created_at"),
       this.client.from("daily_tasks").select("id,subtask_id,step_item_id,task_date,sort_order").eq("task_date", today()).order("sort_order"),
+      this.client.from("dnf_notes").select("id,topic,reason,task_title,task_source,task_date,created_at").order("created_at", { ascending: false }),
     ]);
-    [mainTasks, templates, dailyTasks].forEach(({ error }) => {
+    [mainTasks, templates, dailyTasks, dnfNotes].forEach(({ error }) => {
       if (error) throw error;
     });
     return {
@@ -335,6 +350,15 @@ class SupabaseStore {
         stepItemId: task.step_item_id,
         taskDate: task.task_date,
         sortOrder: task.sort_order,
+      })),
+      dnfNotes: dnfNotes.data.map((note) => ({
+        id: note.id,
+        topic: note.topic,
+        reason: note.reason,
+        taskTitle: note.task_title,
+        taskSource: note.task_source,
+        taskDate: note.task_date,
+        createdAt: note.created_at,
       })),
     };
   }
@@ -440,6 +464,23 @@ class SupabaseStore {
       if (error) throw error;
     }
   }
+
+  async createDnfNote(payload) {
+    const { error } = await this.client.from("dnf_notes").insert({
+      user_id: await this.userId(),
+      topic: payload.topic,
+      reason: payload.reason,
+      task_title: payload.taskTitle,
+      task_source: payload.taskSource,
+      task_date: payload.taskDate,
+    });
+    if (error) throw error;
+  }
+
+  async deleteDnfNote(noteId) {
+    const { error } = await this.client.from("dnf_notes").delete().eq("id", noteId);
+    if (error) throw error;
+  }
 }
 
 function showToast(message) {
@@ -478,6 +519,10 @@ function resolveDailyTask(dailyTask) {
   }
   const { subtask, mainTask } = findSubtask(dailyTask.subtaskId);
   return subtask && { dailyTask, target: subtask, mainTask, targetType: "subtask" };
+}
+
+function dailyTaskSource({ targetType, parentStep, mainTask }) {
+  return targetType === "step-item" ? `${mainTask.title} · ${parentStep.title}` : mainTask.title;
 }
 
 function renderTaskRow(subtask, mainTask, options = {}) {
@@ -577,11 +622,12 @@ function renderToday() {
             </div>`
       }
     </section>
+    ${renderDnfJournal()}
   `;
 }
 
 function renderDailyRow({ dailyTask, target, parentStep, mainTask, targetType }, index, total) {
-  const source = targetType === "step-item" ? `${mainTask.title} · ${parentStep.title}` : mainTask.title;
+  const source = dailyTaskSource({ targetType, parentStep, mainTask });
   return `
     <div class="task-row daily-row ${target.completed ? "completed" : ""}">
       <input type="checkbox" data-action="${targetType === "step-item" ? "toggle-step-item" : "toggle-subtask"}" data-id="${target.id}" ${target.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(target.title)} complete" />
@@ -594,8 +640,52 @@ function renderDailyRow({ dailyTask, target, parentStep, mainTask, targetType },
         <button class="order-button" type="button" data-action="move-daily" data-direction="-1" data-id="${dailyTask.id}" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(target.title)} up">↑</button>
         <button class="order-button" type="button" data-action="move-daily" data-direction="1" data-id="${dailyTask.id}" ${index === total - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(target.title)} down">↓</button>
       </div>
+      <button class="button button-small button-quiet dnf-button" type="button" data-action="open-dnf-modal" data-id="${dailyTask.id}">DNF</button>
       <button class="icon-button" type="button" data-action="remove-daily" data-id="${dailyTask.id}" aria-label="Remove ${escapeHtml(target.title)} from today">×</button>
     </div>
+  `;
+}
+
+function renderDnfJournal() {
+  const notes = state.dnfNotes || [];
+  const topics = [...new Set(notes.map((note) => note.topic))].sort((a, b) => a.localeCompare(b));
+  return `
+    <section class="section dnf-section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">DNF memory</p>
+          <h2>Reasons to remember</h2>
+          <p>Capture what got in the way, then browse those notes by topic when you plan again.</p>
+        </div>
+      </div>
+      ${
+        notes.length
+          ? `<div class="dnf-journal">
+              <div class="topic-filters">
+                <button class="topic-filter active" type="button" data-action="filter-dnf" data-topic="">All topics</button>
+                ${topics.map((topic) => `<button class="topic-filter" type="button" data-action="filter-dnf" data-topic="${escapeHtml(topic)}">${escapeHtml(topic)}</button>`).join("")}
+              </div>
+              <div class="dnf-list" id="dnf-list">${notes.map(renderDnfNote).join("")}</div>
+            </div>`
+          : `<div class="empty-state compact-empty"><h3>No DNF notes yet</h3><p>When a task cannot happen today, use its DNF button to save the reason for later.</p></div>`
+      }
+    </section>
+  `;
+}
+
+function renderDnfNote(note) {
+  const date = new Date(`${note.taskDate}T12:00:00`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return `
+    <article class="dnf-note" data-topic="${escapeHtml(note.topic)}">
+      <div class="dnf-note-heading">
+        <span class="topic-chip">${escapeHtml(note.topic)}</span>
+        <span class="dnf-date">${escapeHtml(date)}</span>
+        <button class="icon-button" type="button" data-action="delete-dnf-note" data-id="${note.id}" aria-label="Delete DNF note">×</button>
+      </div>
+      <h3>${escapeHtml(note.taskTitle)}</h3>
+      <p class="dnf-source">${escapeHtml(note.taskSource)}</p>
+      <p>${escapeHtml(note.reason)}</p>
+    </article>
   `;
 }
 
@@ -746,6 +836,22 @@ function showPomodoroSettingsModal() {
   `);
 }
 
+function showDnfModal(dailyTaskId) {
+  const dailyItem = resolveDailyTask(state.dailyTasks.find((item) => item.id === dailyTaskId));
+  const source = dailyTaskSource(dailyItem);
+  const suggestedTopics = [...new Set((state.dnfNotes || []).map((note) => note.topic))];
+  showModal(`
+    <form id="dnf-form" data-id="${dailyTaskId}" data-task-title="${escapeHtml(dailyItem.target.title)}" data-task-source="${escapeHtml(source)}">
+      <div class="dialog-heading"><div><p class="eyebrow">Did not finish</p><h2>Remember why</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Save a short note for <strong>${escapeHtml(dailyItem.target.title)}</strong>. Topics make recurring blockers easier to spot.</p>
+      <label>Topic<input name="topic" required list="dnf-topics" placeholder="e.g. waiting, energy, unclear, time" /></label>
+      <datalist id="dnf-topics">${suggestedTopics.map((topic) => `<option value="${escapeHtml(topic)}"></option>`).join("")}</datalist>
+      <label>Reason<textarea name="reason" required placeholder="What stopped this task from happening today?"></textarea></label>
+      <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Save DNF note</button></div>
+    </form>
+  `);
+}
+
 function showTemplateModal() {
   showModal(`
     <form id="template-form">
@@ -866,6 +972,16 @@ document.addEventListener("submit", async (event) => {
     render();
     showToast("Timer settings saved.");
   }
+  if (event.target.id === "dnf-form") {
+    await run(() => store.createDnfNote({
+      topic: data.topic.trim(),
+      reason: data.reason.trim(),
+      taskTitle: event.target.dataset.taskTitle,
+      taskSource: event.target.dataset.taskSource,
+      taskDate: today(),
+    }), "DNF note saved.");
+    closeModal();
+  }
   if (event.target.id === "template-form") {
     data.subtasks = data.subtasks.split("\n").map((item) => item.trim()).filter(Boolean);
     await run(() => store.createTemplate(data), "Template saved.");
@@ -885,6 +1001,9 @@ document.addEventListener("click", async (event) => {
   if (action === "pomodoro-toggle") togglePomodoro();
   if (action === "pomodoro-reset") resetPomodoro();
   if (action === "pomodoro-mode") selectPomodoroMode(target.dataset.mode);
+  if (action === "open-dnf-modal") showDnfModal(targetId);
+  if (action === "delete-dnf-note" && confirm("Delete this DNF note?")) await run(() => store.deleteDnfNote(targetId), "DNF note deleted.");
+  if (action === "filter-dnf") filterDnfNotes(target.dataset.topic);
   if (action === "open-template-modal") showTemplateModal();
   if (action === "close-modal") closeModal();
   if (action === "use-template") showMainTaskModal(targetId);
@@ -899,6 +1018,13 @@ document.addEventListener("click", async (event) => {
     window.location.reload();
   }
 });
+
+function filterDnfNotes(topic) {
+  document.querySelectorAll(".topic-filter").forEach((button) => button.classList.toggle("active", button.dataset.topic === topic));
+  document.querySelectorAll(".dnf-note").forEach((note) => {
+    note.hidden = Boolean(topic && note.dataset.topic !== topic);
+  });
+}
 
 document.addEventListener("change", async (event) => {
   if (event.target.dataset.action === "toggle-subtask") {

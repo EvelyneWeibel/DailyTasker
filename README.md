@@ -8,6 +8,9 @@ checklist of subtasks.
 The Today page also includes a browser-local Pomodoro timer. Focus sessions, short breaks, and
 long breaks can be customized without an additional Supabase migration.
 
+Daily items can be marked DNF with a topic and a reason. The Today page keeps a topic-filtered
+history so recurring blockers are easy to remember.
+
 ## Preview locally
 
 Run a static server from this folder:
@@ -42,6 +45,8 @@ If you set up Supabase before nested subtasks were added, run
 
 Then run `migrations/20260601_add_duration_and_daily_subtasks.sql` once to add estimated
 durations, allow nested subtasks on today's list, and save your preferred daily ordering.
+
+Run `migrations/20260601_add_dnf_notes.sql` once to add the topic-filtered DNF journal.
 
 ## Publish with GitHub Pages
 

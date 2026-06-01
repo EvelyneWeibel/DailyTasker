@@ -63,12 +63,24 @@ create unique index daily_tasks_unique_step_item
   on public.daily_tasks (user_id, step_item_id, task_date)
   where step_item_id is not null;
 
+create table public.dnf_notes (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  topic text not null,
+  reason text not null,
+  task_title text not null,
+  task_source text not null default '',
+  task_date date not null default current_date,
+  created_at timestamptz not null default now()
+);
+
 alter table public.main_tasks enable row level security;
 alter table public.subtasks enable row level security;
 alter table public.step_items enable row level security;
 alter table public.task_templates enable row level security;
 alter table public.template_subtasks enable row level security;
 alter table public.daily_tasks enable row level security;
+alter table public.dnf_notes enable row level security;
 
 create policy "Users manage their own main tasks" on public.main_tasks
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
@@ -86,4 +98,7 @@ create policy "Users manage their own template subtasks" on public.template_subt
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create policy "Users manage their own daily tasks" on public.daily_tasks
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "Users manage their own DNF notes" on public.dnf_notes
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
