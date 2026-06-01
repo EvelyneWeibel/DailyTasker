@@ -724,9 +724,11 @@ function renderTasks() {
     </section>
     ${
       matchingTasks.length
-        ? `<div class="grid">${matchingTasks.map(renderMainTaskCard).join("")}</div>`
+        ? `<div class="grid" id="main-task-grid">${matchingTasks.map(renderMainTaskCard).join("")}</div>
+           <div class="empty-state" id="main-task-no-results" hidden><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
         : state.mainTasks.length
-          ? `<div class="empty-state"><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
+          ? `<div class="grid" id="main-task-grid"></div>
+             <div class="empty-state" id="main-task-no-results"><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
         : `<div class="empty-state"><h2>No main tasks yet</h2><p>Create a main task from scratch or use one of your templates.</p><div class="empty-state-actions"><button class="button button-primary" type="button" data-action="open-main-task-modal">Create a main task</button></div></div>`
     }
   `;
@@ -734,19 +736,22 @@ function renderTasks() {
 
 function mainTaskMatchesQuery(mainTask, query) {
   if (!query) return true;
-  const searchableText = [
+  return mainTaskSearchText(mainTask).includes(query);
+}
+
+function mainTaskSearchText(mainTask) {
+  return [
     mainTask.title,
     mainTask.description,
     ...mainTask.subtasks.flatMap((subtask) => [subtask.title, ...(subtask.stepItems || []).map((stepItem) => stepItem.title)]),
   ].join(" ").toLowerCase();
-  return searchableText.includes(query);
 }
 
 function renderMainTaskCard(mainTask) {
   const completed = mainTask.subtasks.filter((item) => item.completed).length;
   const collapsed = tasksUi.collapsedIds.includes(mainTask.id);
   return `
-    <article class="card main-task-card ${collapsed ? "collapsed" : ""}">
+    <article class="card main-task-card ${collapsed ? "collapsed" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}">
       <header class="card-header">
         <div>
           <h3>${escapeHtml(mainTask.title)}</h3>
@@ -1066,8 +1071,7 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("input", (event) => {
   if (event.target.id === "main-task-search") {
     tasksUi.query = event.target.value;
-    renderTasks();
-    document.querySelector("#main-task-search")?.focus();
+    filterMainTaskCards();
   }
 });
 
@@ -1090,6 +1094,19 @@ function setAllMainTasksCollapsed(collapsed) {
   tasksUi.collapsedIds = collapsed ? state.mainTasks.map((mainTask) => mainTask.id) : [];
   saveTasksUi();
   renderTasks();
+}
+
+function filterMainTaskCards() {
+  const query = tasksUi.query.trim().toLowerCase();
+  const cards = [...document.querySelectorAll(".main-task-card")];
+  let visibleCount = 0;
+  cards.forEach((card) => {
+    const matches = card.dataset.search.includes(query);
+    card.hidden = !matches;
+    if (matches) visibleCount += 1;
+  });
+  const noResults = document.querySelector("#main-task-no-results");
+  if (noResults) noResults.hidden = visibleCount > 0;
 }
 
 document.addEventListener("change", async (event) => {
