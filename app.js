@@ -914,10 +914,9 @@ async function initializeStore() {
 function renderAuth(client) {
   app.innerHTML = `
     <section class="auth-card">
-      <p class="eyebrow">One quick step</p>
-      <h2>Sign in to your task list</h2>
-      <p>Enter your email and Supabase will send you a magic link. No password needed.</p>
-      <p class="setup-note">In Supabase Auth URL Configuration, use this exact Site URL and Redirect URL:<br /><strong>${escapeHtml(authRedirectUrl())}</strong></p>
+      <p class="eyebrow">Welcome back</p>
+      <h2>Log in with your email address</h2>
+      <p>We will send you a secure link to open your task list.</p>
       <form id="auth-form">
         <label>Email address<input type="email" name="email" required placeholder="you@example.com" /></label>
         <div class="auth-actions"><button class="button button-primary">Send magic link</button></div>
