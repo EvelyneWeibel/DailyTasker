@@ -42,6 +42,24 @@ const escapeHtml = (value = "") =>
     const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
     return entities[character];
   });
+const estimatedMinutes = (value) => Number(value) || 0;
+const durationLabel = (minutes) => {
+  if (!estimatedMinutes(minutes)) return "No estimate";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+};
+const durationClass = (minutes) => {
+  if (!estimatedMinutes(minutes) || minutes <= 15) return "quick";
+  if (minutes <= 45) return "medium";
+  return "long";
+};
+const durationBadge = (minutes, targetType, targetId) => {
+  const content = durationLabel(minutes);
+  if (!targetType || !targetId) return `<span class="duration-badge ${durationClass(minutes)}">${content}</span>`;
+  return `<button class="duration-badge ${durationClass(minutes)}" type="button" data-action="open-duration-modal" data-target-type="${targetType}" data-id="${targetId}" aria-label="Edit estimate for ${targetType}">${content}</button>`;
+};
 
 class DemoStore {
   constructor() {
@@ -60,9 +78,9 @@ class DemoStore {
           title: "Launch portfolio",
           description: "A small step each day until the site is live.",
           subtasks: [
-            { id: id(), title: "Choose the best three projects", completed: false, stepItems: [] },
-            { id: id(), title: "Write a short introduction", completed: false, stepItems: [] },
-            { id: id(), title: "Pick a profile photo", completed: false, stepItems: [] },
+            { id: id(), title: "Choose the best three projects", completed: false, estimatedMinutes: 20, stepItems: [] },
+            { id: id(), title: "Write a short introduction", completed: false, estimatedMinutes: 35, stepItems: [] },
+            { id: id(), title: "Pick a profile photo", completed: false, estimatedMinutes: 10, stepItems: [] },
           ],
         },
       ],
@@ -92,7 +110,14 @@ class DemoStore {
     const data = structuredClone(this.data);
     data.mainTasks.forEach((mainTask) => mainTask.subtasks.forEach((subtask) => {
       subtask.stepItems ||= [];
+      subtask.estimatedMinutes ||= 0;
+      subtask.stepItems.forEach((stepItem) => {
+        stepItem.estimatedMinutes ||= 0;
+      });
     }));
+    data.dailyTasks.forEach((dailyTask, index) => {
+      dailyTask.sortOrder ??= index;
+    });
     data.dailyTasks = data.dailyTasks.filter((item) => item.taskDate === today());
     return data;
   }
@@ -101,22 +126,22 @@ class DemoStore {
     const task = { id: id(), title: payload.title, description: payload.description, subtasks: [] };
     if (payload.templateId) {
       const template = this.data.templates.find((item) => item.id === payload.templateId);
-      task.subtasks = template.subtasks.map((item) => ({ id: id(), title: item.title, completed: false, stepItems: [] }));
+      task.subtasks = template.subtasks.map((item) => ({ id: id(), title: item.title, completed: false, estimatedMinutes: 0, stepItems: [] }));
     }
     this.data.mainTasks.push(task);
     this.save();
   }
 
-  async createSubtask(mainTaskId, title) {
+  async createSubtask(mainTaskId, title, estimatedMinutesValue) {
     const mainTask = this.data.mainTasks.find((item) => item.id === mainTaskId);
-    mainTask.subtasks.push({ id: id(), title, completed: false, stepItems: [] });
+    mainTask.subtasks.push({ id: id(), title, completed: false, estimatedMinutes: estimatedMinutes(estimatedMinutesValue), stepItems: [] });
     this.save();
   }
 
-  async createStepItem(subtaskId, title) {
+  async createStepItem(subtaskId, title, estimatedMinutesValue) {
     const subtask = this.data.mainTasks.flatMap((item) => item.subtasks).find((item) => item.id === subtaskId);
     subtask.stepItems ||= [];
-    subtask.stepItems.push({ id: id(), title, completed: false });
+    subtask.stepItems.push({ id: id(), title, completed: false, estimatedMinutes: estimatedMinutes(estimatedMinutesValue) });
     this.save();
   }
 
@@ -129,6 +154,14 @@ class DemoStore {
     this.save();
   }
 
+  async updateEstimate(targetType, targetId, estimatedMinutesValue) {
+    const target = targetType === "step-item"
+      ? this.data.mainTasks.flatMap((item) => item.subtasks).flatMap((item) => item.stepItems || []).find((item) => item.id === targetId)
+      : this.data.mainTasks.flatMap((item) => item.subtasks).find((item) => item.id === targetId);
+    target.estimatedMinutes = estimatedMinutes(estimatedMinutesValue);
+    this.save();
+  }
+
   async toggleSubtask(subtaskId, completed) {
     const subtask = this.data.mainTasks.flatMap((item) => item.subtasks).find((item) => item.id === subtaskId);
     subtask.completed = completed;
@@ -136,9 +169,11 @@ class DemoStore {
   }
 
   async deleteMainTask(mainTaskId) {
-    const subtaskIds = this.data.mainTasks.find((item) => item.id === mainTaskId).subtasks.map((item) => item.id);
+    const subtasks = this.data.mainTasks.find((item) => item.id === mainTaskId).subtasks;
+    const subtaskIds = subtasks.map((item) => item.id);
+    const stepItemIds = subtasks.flatMap((item) => item.stepItems || []).map((item) => item.id);
     this.data.mainTasks = this.data.mainTasks.filter((item) => item.id !== mainTaskId);
-    this.data.dailyTasks = this.data.dailyTasks.filter((item) => !subtaskIds.includes(item.subtaskId));
+    this.data.dailyTasks = this.data.dailyTasks.filter((item) => !subtaskIds.includes(item.subtaskId) && !stepItemIds.includes(item.stepItemId));
     this.save();
   }
 
@@ -152,15 +187,27 @@ class DemoStore {
     this.save();
   }
 
-  async addDailyTask(subtaskId) {
-    if (!this.data.dailyTasks.some((item) => item.subtaskId === subtaskId && item.taskDate === today())) {
-      this.data.dailyTasks.push({ id: id(), subtaskId, taskDate: today() });
+  async addDailyTask(targetType, targetId) {
+    const key = targetType === "step-item" ? "stepItemId" : "subtaskId";
+    if (!this.data.dailyTasks.some((item) => item[key] === targetId && item.taskDate === today())) {
+      this.data.dailyTasks.push({ id: id(), [key]: targetId, taskDate: today(), sortOrder: this.nextDailySortOrder() });
       this.save();
     }
   }
 
+  nextDailySortOrder() {
+    return Math.max(-1, ...this.data.dailyTasks.filter((item) => item.taskDate === today()).map((item) => item.sortOrder ?? 0)) + 1;
+  }
+
   async removeDailyTask(dailyTaskId) {
     this.data.dailyTasks = this.data.dailyTasks.filter((item) => item.id !== dailyTaskId);
+    this.save();
+  }
+
+  async reorderDailyTasks(orderedIds) {
+    orderedIds.forEach((dailyTaskId, index) => {
+      this.data.dailyTasks.find((item) => item.id === dailyTaskId).sortOrder = index;
+    });
     this.save();
   }
 }
@@ -178,9 +225,9 @@ class SupabaseStore {
 
   async load() {
     const [mainTasks, templates, dailyTasks] = await Promise.all([
-      this.client.from("main_tasks").select("id,title,description,subtasks(id,title,completed,step_items(id,title,completed))").order("created_at"),
+      this.client.from("main_tasks").select("id,title,description,subtasks(id,title,completed,estimated_minutes,step_items(id,title,completed,estimated_minutes))").order("created_at"),
       this.client.from("task_templates").select("id,title,description,template_subtasks(id,title)").order("created_at"),
-      this.client.from("daily_tasks").select("id,subtask_id,task_date").eq("task_date", today()),
+      this.client.from("daily_tasks").select("id,subtask_id,step_item_id,task_date,sort_order").eq("task_date", today()).order("sort_order"),
     ]);
     [mainTasks, templates, dailyTasks].forEach(({ error }) => {
       if (error) throw error;
@@ -188,7 +235,11 @@ class SupabaseStore {
     return {
       mainTasks: mainTasks.data.map((task) => ({
         ...task,
-        subtasks: (task.subtasks || []).map((subtask) => ({ ...subtask, stepItems: subtask.step_items || [] })),
+        subtasks: (task.subtasks || []).map((subtask) => ({
+          ...subtask,
+          estimatedMinutes: subtask.estimated_minutes || 0,
+          stepItems: (subtask.step_items || []).map((stepItem) => ({ ...stepItem, estimatedMinutes: stepItem.estimated_minutes || 0 })),
+        })),
       })),
       templates: templates.data.map((template) => ({
         ...template,
@@ -197,7 +248,9 @@ class SupabaseStore {
       dailyTasks: dailyTasks.data.map((task) => ({
         id: task.id,
         subtaskId: task.subtask_id,
+        stepItemId: task.step_item_id,
         taskDate: task.task_date,
+        sortOrder: task.sort_order,
       })),
     };
   }
@@ -220,11 +273,12 @@ class SupabaseStore {
     }
   }
 
-  async createSubtask(mainTaskId, title) {
+  async createSubtask(mainTaskId, title, estimatedMinutesValue) {
     const { error } = await this.client.from("subtasks").insert({
       user_id: await this.userId(),
       main_task_id: mainTaskId,
       title,
+      estimated_minutes: estimatedMinutes(estimatedMinutesValue),
     });
     if (error) throw error;
   }
@@ -234,17 +288,24 @@ class SupabaseStore {
     if (error) throw error;
   }
 
-  async createStepItem(subtaskId, title) {
+  async createStepItem(subtaskId, title, estimatedMinutesValue) {
     const { error } = await this.client.from("step_items").insert({
       user_id: await this.userId(),
       subtask_id: subtaskId,
       title,
+      estimated_minutes: estimatedMinutes(estimatedMinutesValue),
     });
     if (error) throw error;
   }
 
   async toggleStepItem(stepItemId, completed) {
     const { error } = await this.client.from("step_items").update({ completed }).eq("id", stepItemId);
+    if (error) throw error;
+  }
+
+  async updateEstimate(targetType, targetId, estimatedMinutesValue) {
+    const table = targetType === "step-item" ? "step_items" : "subtasks";
+    const { error } = await this.client.from(table).update({ estimated_minutes: estimatedMinutes(estimatedMinutesValue) }).eq("id", targetId);
     if (error) throw error;
   }
 
@@ -273,17 +334,27 @@ class SupabaseStore {
     if (error) throw error;
   }
 
-  async addDailyTask(subtaskId) {
-    const { error } = await this.client.from("daily_tasks").upsert(
-      { user_id: await this.userId(), subtask_id: subtaskId, task_date: today() },
-      { onConflict: "user_id,subtask_id,task_date" },
-    );
+  async addDailyTask(targetType, targetId) {
+    const payload = {
+      user_id: await this.userId(),
+      task_date: today(),
+      sort_order: Math.max(-1, ...state.dailyTasks.map((item) => item.sortOrder ?? 0)) + 1,
+    };
+    payload[targetType === "step-item" ? "step_item_id" : "subtask_id"] = targetId;
+    const { error } = await this.client.from("daily_tasks").insert(payload);
     if (error) throw error;
   }
 
   async removeDailyTask(dailyTaskId) {
     const { error } = await this.client.from("daily_tasks").delete().eq("id", dailyTaskId);
     if (error) throw error;
+  }
+
+  async reorderDailyTasks(orderedIds) {
+    for (const [index, dailyTaskId] of orderedIds.entries()) {
+      const { error } = await this.client.from("daily_tasks").update({ sort_order: index }).eq("id", dailyTaskId);
+      if (error) throw error;
+    }
   }
 }
 
@@ -306,40 +377,61 @@ function findSubtask(subtaskId) {
   return {};
 }
 
+function findStepItem(stepItemId) {
+  for (const mainTask of state.mainTasks) {
+    for (const subtask of mainTask.subtasks) {
+      const stepItem = (subtask.stepItems || []).find((item) => item.id === stepItemId);
+      if (stepItem) return { stepItem, subtask, mainTask };
+    }
+  }
+  return {};
+}
+
+function resolveDailyTask(dailyTask) {
+  if (dailyTask.stepItemId) {
+    const { stepItem, subtask, mainTask } = findStepItem(dailyTask.stepItemId);
+    return stepItem && { dailyTask, target: stepItem, parentStep: subtask, mainTask, targetType: "step-item" };
+  }
+  const { subtask, mainTask } = findSubtask(dailyTask.subtaskId);
+  return subtask && { dailyTask, target: subtask, mainTask, targetType: "subtask" };
+}
+
 function renderTaskRow(subtask, mainTask, options = {}) {
   const dailyTask = state.dailyTasks.find((item) => item.subtaskId === subtask.id);
   const stepItems = subtask.stepItems || [];
-  const action = options.today
-    ? `<button class="icon-button" type="button" data-action="remove-daily" data-id="${dailyTask.id}" aria-label="Remove ${escapeHtml(subtask.title)} from today">×</button>`
-    : `<button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-id="${subtask.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>`;
+  const action = `<button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-target-type="subtask" data-id="${subtask.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>`;
   return `
     <div class="task-group">
       <div class="task-row ${subtask.completed ? "completed" : ""}">
         <input type="checkbox" data-action="toggle-subtask" data-id="${subtask.id}" ${subtask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(subtask.title)} complete" />
         <div class="task-text">
           <div class="task-name">${escapeHtml(subtask.title)}</div>
-          ${options.today ? `<div class="task-source">${escapeHtml(mainTask.title)}</div>` : ""}
+          ${durationBadge(subtask.estimatedMinutes, "subtask", subtask.id)}
         </div>
         ${action}
       </div>
-      ${stepItems.length ? `<div class="step-item-list">${stepItems.map(renderStepItem).join("")}</div>` : ""}
+      ${stepItems.length ? `<div class="step-item-list">${stepItems.map((stepItem) => renderStepItem(stepItem)).join("")}</div>` : ""}
       <button class="add-step-item" type="button" data-action="open-step-item-modal" data-id="${subtask.id}">+ Add subtask</button>
     </div>
   `;
 }
 
 function renderStepItem(stepItem) {
+  const dailyTask = state.dailyTasks.find((item) => item.stepItemId === stepItem.id);
   return `
-    <label class="step-item ${stepItem.completed ? "completed" : ""}">
+    <div class="step-item ${stepItem.completed ? "completed" : ""}">
       <input type="checkbox" data-action="toggle-step-item" data-id="${stepItem.id}" ${stepItem.completed ? "checked" : ""} />
-      <span>${escapeHtml(stepItem.title)}</span>
-    </label>
+      <span class="step-item-title">${escapeHtml(stepItem.title)}</span>
+      ${durationBadge(stepItem.estimatedMinutes, "step-item", stepItem.id)}
+      <button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-target-type="step-item" data-id="${stepItem.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>
+    </div>
   `;
 }
 
 function renderToday() {
-  const dailyItems = state.dailyTasks.map((dailyTask) => ({ dailyTask, ...findSubtask(dailyTask.subtaskId) })).filter((item) => item.subtask);
-  const completed = dailyItems.filter(({ subtask }) => subtask.completed).length;
+  const dailyItems = state.dailyTasks.map(resolveDailyTask).filter(Boolean).sort((a, b) => a.dailyTask.sortOrder - b.dailyTask.sortOrder);
+  const completed = dailyItems.filter(({ target }) => target.completed).length;
+  const totalMinutes = dailyItems.reduce((total, { target }) => total + estimatedMinutes(target.estimatedMinutes), 0);
   const progress = dailyItems.length ? Math.round((completed / dailyItems.length) * 100) : 0;
   const date = new Date();
   app.innerHTML = `
@@ -355,15 +447,15 @@ function renderToday() {
       <div class="section-heading">
         <div>
           <h2>Today's list</h2>
-          <p>${completed} of ${dailyItems.length} small tasks complete</p>
+          <p>${completed} of ${dailyItems.length} small tasks complete · ${durationLabel(totalMinutes)} planned</p>
         </div>
-        <a class="button button-primary" href="#tasks">+ Choose tasks</a>
+        <div class="card-actions"><button class="button button-quiet" type="button" data-action="sort-duration">Quickest first</button><a class="button button-primary" href="#tasks">+ Choose tasks</a></div>
       </div>
       ${
         dailyItems.length
           ? `<div class="card">
               <div class="progress-line"><div class="progress-track"><div class="progress-bar" style="width:${progress}%"></div></div><span>${progress}%</span></div>
-              <div class="task-list">${dailyItems.map(({ subtask, mainTask }) => renderTaskRow(subtask, mainTask, { today: true })).join("")}</div>
+              <div class="task-list">${dailyItems.map((item, index) => renderDailyRow(item, index, dailyItems.length)).join("")}</div>
             </div>`
           : `<div class="empty-state">
               <h2>Start with one small thing</h2>
@@ -372,6 +464,25 @@ function renderToday() {
             </div>`
       }
     </section>
+  `;
+}
+
+function renderDailyRow({ dailyTask, target, parentStep, mainTask, targetType }, index, total) {
+  const source = targetType === "step-item" ? `${mainTask.title} · ${parentStep.title}` : mainTask.title;
+  return `
+    <div class="task-row daily-row ${target.completed ? "completed" : ""}">
+      <input type="checkbox" data-action="${targetType === "step-item" ? "toggle-step-item" : "toggle-subtask"}" data-id="${target.id}" ${target.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(target.title)} complete" />
+      <div class="task-text">
+        <div class="task-name">${escapeHtml(target.title)}</div>
+        <div class="task-source">${escapeHtml(source)}</div>
+      </div>
+      ${durationBadge(target.estimatedMinutes, targetType, target.id)}
+      <div class="order-actions">
+        <button class="order-button" type="button" data-action="move-daily" data-direction="-1" data-id="${dailyTask.id}" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(target.title)} up">↑</button>
+        <button class="order-button" type="button" data-action="move-daily" data-direction="1" data-id="${dailyTask.id}" ${index === total - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(target.title)} down">↓</button>
+      </div>
+      <button class="icon-button" type="button" data-action="remove-daily" data-id="${dailyTask.id}" aria-label="Remove ${escapeHtml(target.title)} from today">×</button>
+    </div>
   `;
 }
 
@@ -478,6 +589,7 @@ function showSubtaskModal(mainTaskId) {
     <form id="subtask-form" data-id="${mainTask.id}">
       <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(mainTask.title)}</p><h2>Add a small step</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
       <label>Small task<input name="title" required autofocus placeholder="e.g. Book the train tickets" /></label>
+      <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="15" /></label>
       <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Add step</button></div>
     </form>
   `);
@@ -489,7 +601,19 @@ function showStepItemModal(subtaskId) {
     <form id="step-item-form" data-id="${subtask.id}">
       <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(subtask.title)}</p><h2>Add a subtask</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
       <label>Subtask<input name="title" required autofocus placeholder="e.g. Write the opening paragraph" /></label>
+      <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="10" /></label>
       <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Add subtask</button></div>
+    </form>
+  `);
+}
+
+function showDurationModal(targetType, targetId) {
+  const target = targetType === "step-item" ? findStepItem(targetId).stepItem : findSubtask(targetId).subtask;
+  showModal(`
+    <form id="duration-form" data-id="${target.id}" data-target-type="${targetType}">
+      <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(target.title)}</p><h2>Edit estimated duration</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
+      <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="${estimatedMinutes(target.estimatedMinutes)}" autofocus /></label>
+      <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Save estimate</button></div>
     </form>
   `);
 }
@@ -520,6 +644,27 @@ async function run(action, successMessage) {
     console.error(error);
     showToast(error.message || "Something went wrong.");
   }
+}
+
+async function reorderDailyTask(dailyTaskId, direction) {
+  const orderedIds = state.dailyTasks
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((item) => item.id);
+  const currentIndex = orderedIds.indexOf(dailyTaskId);
+  const nextIndex = currentIndex + direction;
+  if (currentIndex < 0 || nextIndex < 0 || nextIndex >= orderedIds.length) return;
+  [orderedIds[currentIndex], orderedIds[nextIndex]] = [orderedIds[nextIndex], orderedIds[currentIndex]];
+  await store.reorderDailyTasks(orderedIds);
+}
+
+async function sortDailyTasksByDuration() {
+  const orderedIds = state.dailyTasks
+    .map(resolveDailyTask)
+    .filter(Boolean)
+    .sort((a, b) => estimatedMinutes(a.target.estimatedMinutes) - estimatedMinutes(b.target.estimatedMinutes))
+    .map((item) => item.dailyTask.id);
+  await store.reorderDailyTasks(orderedIds);
 }
 
 async function initializeStore() {
@@ -571,11 +716,15 @@ document.addEventListener("submit", async (event) => {
     closeModal();
   }
   if (event.target.id === "subtask-form") {
-    await run(() => store.createSubtask(event.target.dataset.id, data.title), "Small step added.");
+    await run(() => store.createSubtask(event.target.dataset.id, data.title, data.estimatedMinutes), "Small step added.");
     closeModal();
   }
   if (event.target.id === "step-item-form") {
-    await run(() => store.createStepItem(event.target.dataset.id, data.title), "Subtask added.");
+    await run(() => store.createStepItem(event.target.dataset.id, data.title, data.estimatedMinutes), "Subtask added.");
+    closeModal();
+  }
+  if (event.target.id === "duration-form") {
+    await run(() => store.updateEstimate(event.target.dataset.targetType, event.target.dataset.id, data.estimatedMinutes), "Estimate updated.");
     closeModal();
   }
   if (event.target.id === "template-form") {
@@ -592,11 +741,14 @@ document.addEventListener("click", async (event) => {
   if (action === "open-main-task-modal") showMainTaskModal();
   if (action === "open-subtask-modal") showSubtaskModal(targetId);
   if (action === "open-step-item-modal") showStepItemModal(targetId);
+  if (action === "open-duration-modal") showDurationModal(target.dataset.targetType, targetId);
   if (action === "open-template-modal") showTemplateModal();
   if (action === "close-modal") closeModal();
   if (action === "use-template") showMainTaskModal(targetId);
-  if (action === "add-daily") await run(() => store.addDailyTask(targetId), "Added to today's list.");
+  if (action === "add-daily") await run(() => store.addDailyTask(target.dataset.targetType, targetId), "Added to today's list.");
   if (action === "remove-daily") await run(() => store.removeDailyTask(targetId), "Removed from today's list.");
+  if (action === "move-daily") await run(() => reorderDailyTask(targetId, Number(target.dataset.direction)));
+  if (action === "sort-duration") await run(sortDailyTasksByDuration, "Today's list sorted by duration.");
   if (action === "delete-main-task" && confirm("Delete this main task and its small steps?")) await run(() => store.deleteMainTask(targetId), "Main task deleted.");
   if (action === "delete-template" && confirm("Delete this template?")) await run(() => store.deleteTemplate(targetId), "Template deleted.");
   if (action === "switch-demo") {

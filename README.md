@@ -37,6 +37,9 @@ user's data private.
 If you set up Supabase before nested subtasks were added, run
 `migrations/20260601_add_step_items.sql` once in the Supabase SQL editor.
 
+Then run `migrations/20260601_add_duration_and_daily_subtasks.sql` once to add estimated
+durations, allow nested subtasks on today's list, and save your preferred daily ordering.
+
 ## Publish with GitHub Pages
 
 Push these files to a GitHub repository, then open **Settings > Pages** in GitHub. Choose

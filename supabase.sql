@@ -14,6 +14,7 @@ create table public.subtasks (
   main_task_id uuid not null references public.main_tasks(id) on delete cascade,
   title text not null,
   completed boolean not null default false,
+  estimated_minutes integer not null default 0 check (estimated_minutes >= 0),
   created_at timestamptz not null default now()
 );
 
@@ -23,6 +24,7 @@ create table public.step_items (
   subtask_id uuid not null references public.subtasks(id) on delete cascade,
   title text not null,
   completed boolean not null default false,
+  estimated_minutes integer not null default 0 check (estimated_minutes >= 0),
   created_at timestamptz not null default now()
 );
 
@@ -45,11 +47,21 @@ create table public.template_subtasks (
 create table public.daily_tasks (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  subtask_id uuid not null references public.subtasks(id) on delete cascade,
+  subtask_id uuid references public.subtasks(id) on delete cascade,
+  step_item_id uuid references public.step_items(id) on delete cascade,
   task_date date not null default current_date,
+  sort_order integer not null default 0,
   created_at timestamptz not null default now(),
-  unique (user_id, subtask_id, task_date)
+  check ((subtask_id is not null)::integer + (step_item_id is not null)::integer = 1)
 );
+
+create unique index daily_tasks_unique_subtask
+  on public.daily_tasks (user_id, subtask_id, task_date)
+  where subtask_id is not null;
+
+create unique index daily_tasks_unique_step_item
+  on public.daily_tasks (user_id, step_item_id, task_date)
+  where step_item_id is not null;
 
 alter table public.main_tasks enable row level security;
 alter table public.subtasks enable row level security;
