@@ -723,12 +723,9 @@ function renderTasks() {
       </div>
     </section>
     ${
-      matchingTasks.length
-        ? `<div class="grid" id="main-task-grid">${matchingTasks.map(renderMainTaskCard).join("")}</div>
-           <div class="empty-state" id="main-task-no-results" hidden><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
-        : state.mainTasks.length
-          ? `<div class="grid" id="main-task-grid"></div>
-             <div class="empty-state" id="main-task-no-results"><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
+      state.mainTasks.length
+        ? `<div class="grid" id="main-task-grid">${state.mainTasks.map((mainTask) => renderMainTaskCard(mainTask, query)).join("")}</div>
+           <div class="empty-state" id="main-task-no-results" ${matchingTasks.length ? "hidden" : ""}><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
         : `<div class="empty-state"><h2>No main tasks yet</h2><p>Create a main task from scratch or use one of your templates.</p><div class="empty-state-actions"><button class="button button-primary" type="button" data-action="open-main-task-modal">Create a main task</button></div></div>`
     }
   `;
@@ -747,11 +744,12 @@ function mainTaskSearchText(mainTask) {
   ].join(" ").toLowerCase();
 }
 
-function renderMainTaskCard(mainTask) {
+function renderMainTaskCard(mainTask, query = "") {
   const completed = mainTask.subtasks.filter((item) => item.completed).length;
   const collapsed = tasksUi.collapsedIds.includes(mainTask.id);
+  const hidden = !mainTaskMatchesQuery(mainTask, query);
   return `
-    <article class="card main-task-card ${collapsed ? "collapsed" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}">
+    <article class="card main-task-card ${collapsed ? "collapsed" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}" ${hidden ? "hidden" : ""}>
       <header class="card-header">
         <div>
           <h3>${escapeHtml(mainTask.title)}</h3>
