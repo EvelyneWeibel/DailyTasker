@@ -17,6 +17,21 @@ let state = {
 };
 
 const id = () => crypto.randomUUID();
+const authRedirectUrl = () => {
+  const url = new URL(window.location.href);
+  url.hash = "";
+  url.search = "";
+  url.pathname = url.pathname.replace(/index\.html$/, "");
+  return url.toString();
+};
+const normalizeSupabaseUrl = (value) => {
+  const url = new URL(value);
+  if (!["http:", "https:"].includes(url.protocol)) throw new Error("The project URL must start with https://.");
+  if (url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("Use the Supabase project URL only, without an extra path.");
+  }
+  return url.origin;
+};
 const today = () => {
   const date = new Date();
   const pad = (value) => String(value).padStart(2, "0");
@@ -472,6 +487,7 @@ function renderAuth(client) {
       <p class="eyebrow">One quick step</p>
       <h2>Sign in to your task list</h2>
       <p>Enter your email and Supabase will send you a magic link. No password needed.</p>
+      <p class="setup-note">In Supabase Auth URL Configuration, use this exact Site URL and Redirect URL:<br /><strong>${escapeHtml(authRedirectUrl())}</strong></p>
       <form id="auth-form">
         <label>Email address<input type="email" name="email" required placeholder="you@example.com" /></label>
         <div class="auth-actions"><button class="button button-primary">Send magic link</button><button class="button button-quiet" type="button" data-action="switch-demo">Back to demo</button></div>
@@ -481,8 +497,8 @@ function renderAuth(client) {
   document.querySelector("#auth-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const email = new FormData(event.currentTarget).get("email");
-    const { error } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.href.split("#")[0] } });
-    showToast(error ? error.message : "Magic link sent. Check your email.");
+    const { error } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: authRedirectUrl() } });
+    showToast(error ? `${error.message} Check your Supabase project URL and Auth redirect URL.` : "Magic link sent. Check your email.");
   });
 }
 
@@ -538,10 +554,17 @@ settingsButton.addEventListener("click", () => {
 });
 settingsForm.addEventListener("submit", (event) => {
   event.preventDefault();
-  const url = document.querySelector("#supabase-url").value.trim();
+  const urlInput = document.querySelector("#supabase-url").value.trim();
   const key = document.querySelector("#supabase-key").value.trim();
-  if (!url || !key) {
+  if (!urlInput || !key) {
     document.querySelector("#settings-message").textContent = "Add both values to connect your project.";
+    return;
+  }
+  let url;
+  try {
+    url = normalizeSupabaseUrl(urlInput);
+  } catch (error) {
+    document.querySelector("#settings-message").textContent = error.message;
     return;
   }
   localStorage.setItem(CONFIG_KEY, JSON.stringify({ url, key }));

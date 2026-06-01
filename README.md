@@ -19,11 +19,14 @@ browser's local storage.
 
 1. Create a Supabase project.
 2. Open the Supabase SQL editor and run `supabase.sql`.
-3. In Supabase, open **Authentication > URL Configuration** and add your GitHub Pages URL to
-   the redirect URLs. For local testing, also add `http://localhost:8000`.
-4. Open the app and click **Demo mode** in the top-right corner.
-5. Paste the project URL and public anon key from **Project Settings > API**.
-6. Enter your email address and use the magic link Supabase sends you.
+3. In Supabase, open **Authentication > URL Configuration**.
+4. Set **Site URL** to `https://evelyneweibel.github.io/DailyTasker/`.
+5. Add `https://evelyneweibel.github.io/DailyTasker/` to **Redirect URLs**. For local testing,
+   also add `http://localhost:8000/`.
+6. Open the app and click **Demo mode** in the top-right corner.
+7. Paste the project URL and public anon key from **Project Settings > API**. The project URL
+   should look like `https://your-project-ref.supabase.co` without an extra path.
+8. Enter your email address and use the magic link Supabase sends you.
 
 The browser stores only the public anon key. Row-level security policies keep each signed-in
 user's data private.

@@ -512,6 +512,18 @@ select:focus {
   line-height: 1.55;
 }
 
+.setup-note {
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--sage-soft);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.setup-note strong {
+  color: var(--sage-dark);
+}
+
 .auth-actions {
   gap: 8px;
   margin-top: 14px;
