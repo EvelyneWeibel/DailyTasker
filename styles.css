@@ -354,6 +354,24 @@ h3 {
   gap: 15px;
 }
 
+.task-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.search-field {
+  width: min(520px, 100%);
+}
+
+.toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
 .card,
 .empty-state,
 .auth-card {
@@ -368,7 +386,45 @@ h3 {
 }
 
 .card-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 14px;
+}
+
+.collapse-button {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  color: var(--sage-dark);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--sage-soft);
+  font-size: 19px;
+  line-height: 1;
+}
+
+.collapse-button:hover {
+  color: white;
+  background: var(--sage);
+}
+
+.main-task-card.collapsed .card-header {
+  margin-bottom: 8px;
+}
+
+.main-task-card.collapsed > .main-task-details,
+.main-task-card.collapsed .card-actions .main-task-details {
+  display: none;
+}
+
+.main-task-card .card-actions .main-task-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .card-header p,
@@ -875,5 +931,10 @@ select:focus {
   .pomodoro-timer {
     justify-items: start;
     min-width: 0;
+  }
+
+  .task-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 }

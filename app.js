@@ -1,6 +1,7 @@
 const CONFIG_KEY = "daily-tasker-supabase";
 const DEMO_KEY = "daily-tasker-demo-data";
 const POMODORO_KEY = "daily-tasker-pomodoro";
+const TASKS_UI_KEY = "daily-tasker-main-tasks-ui";
 const ROUTES = ["today", "tasks", "templates"];
 const pomodoroDefaults = { focus: 25, shortBreak: 5, longBreak: 15 };
 
@@ -20,6 +21,7 @@ let state = {
 };
 let pomodoro = loadPomodoro();
 let pomodoroInterval;
+let tasksUi = loadTasksUi();
 
 const id = () => crypto.randomUUID();
 const authRedirectUrl = () => {
@@ -75,6 +77,15 @@ function loadPomodoro() {
     endAt: saved?.endAt || null,
     running: Boolean(saved?.running && saved?.endAt),
   };
+}
+
+function loadTasksUi() {
+  const saved = JSON.parse(localStorage.getItem(TASKS_UI_KEY) || "null");
+  return { query: "", collapsedIds: saved?.collapsedIds || [] };
+}
+
+function saveTasksUi() {
+  localStorage.setItem(TASKS_UI_KEY, JSON.stringify({ collapsedIds: tasksUi.collapsedIds }));
 }
 
 function savePomodoro() {
@@ -690,6 +701,8 @@ function renderDnfNote(note) {
 }
 
 function renderTasks() {
+  const query = tasksUi.query.trim().toLowerCase();
+  const matchingTasks = state.mainTasks.filter((mainTask) => mainTaskMatchesQuery(mainTask, query));
   app.innerHTML = `
     <section class="page-title-row">
       <div>
@@ -699,27 +712,55 @@ function renderTasks() {
       </div>
       <button class="button button-primary" type="button" data-action="open-main-task-modal">+ New main task</button>
     </section>
+    <section class="task-toolbar">
+      <label class="search-field">
+        <span>Search main tasks</span>
+        <input id="main-task-search" type="search" value="${escapeHtml(tasksUi.query)}" placeholder="Search projects, steps, or subtasks" autocomplete="off" />
+      </label>
+      <div class="toolbar-actions">
+        <button class="button button-quiet button-small" type="button" data-action="collapse-all-tasks">Reduce all</button>
+        <button class="button button-quiet button-small" type="button" data-action="expand-all-tasks">Expand all</button>
+      </div>
+    </section>
     ${
-      state.mainTasks.length
-        ? `<div class="grid">${state.mainTasks.map(renderMainTaskCard).join("")}</div>`
+      matchingTasks.length
+        ? `<div class="grid">${matchingTasks.map(renderMainTaskCard).join("")}</div>`
+        : state.mainTasks.length
+          ? `<div class="empty-state"><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
         : `<div class="empty-state"><h2>No main tasks yet</h2><p>Create a main task from scratch or use one of your templates.</p><div class="empty-state-actions"><button class="button button-primary" type="button" data-action="open-main-task-modal">Create a main task</button></div></div>`
     }
   `;
 }
 
+function mainTaskMatchesQuery(mainTask, query) {
+  if (!query) return true;
+  const searchableText = [
+    mainTask.title,
+    mainTask.description,
+    ...mainTask.subtasks.flatMap((subtask) => [subtask.title, ...(subtask.stepItems || []).map((stepItem) => stepItem.title)]),
+  ].join(" ").toLowerCase();
+  return searchableText.includes(query);
+}
+
 function renderMainTaskCard(mainTask) {
   const completed = mainTask.subtasks.filter((item) => item.completed).length;
+  const collapsed = tasksUi.collapsedIds.includes(mainTask.id);
   return `
-    <article class="card">
+    <article class="card main-task-card ${collapsed ? "collapsed" : ""}">
       <header class="card-header">
-        <h3>${escapeHtml(mainTask.title)}</h3>
-        <p>${escapeHtml(mainTask.description || `${mainTask.subtasks.length} small steps`)}</p>
+        <div>
+          <h3>${escapeHtml(mainTask.title)}</h3>
+          <p>${escapeHtml(mainTask.description || `${mainTask.subtasks.length} small steps`)}</p>
+        </div>
+        <button class="collapse-button" type="button" data-action="toggle-main-task" data-id="${mainTask.id}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Reduce"} ${escapeHtml(mainTask.title)}">${collapsed ? "+" : "−"}</button>
       </header>
-      <div class="task-list">${mainTask.subtasks.map((subtask) => renderTaskRow(subtask, mainTask)).join("")}</div>
+      <div class="task-list main-task-details">${mainTask.subtasks.map((subtask) => renderTaskRow(subtask, mainTask)).join("")}</div>
       <div class="card-actions">
         <span class="card-meta">${completed}/${mainTask.subtasks.length} done</span>
-        <button class="button button-small button-quiet" type="button" data-action="open-subtask-modal" data-id="${mainTask.id}">+ Add step</button>
-        <button class="button button-small button-quiet button-danger" type="button" data-action="delete-main-task" data-id="${mainTask.id}">Delete</button>
+        <div class="main-task-details">
+          <button class="button button-small button-quiet" type="button" data-action="open-subtask-modal" data-id="${mainTask.id}">+ Add step</button>
+          <button class="button button-small button-quiet button-danger" type="button" data-action="delete-main-task" data-id="${mainTask.id}">Delete</button>
+        </div>
       </div>
     </article>
   `;
@@ -1004,6 +1045,9 @@ document.addEventListener("click", async (event) => {
   if (action === "open-dnf-modal") showDnfModal(targetId);
   if (action === "delete-dnf-note" && confirm("Delete this DNF note?")) await run(() => store.deleteDnfNote(targetId), "DNF note deleted.");
   if (action === "filter-dnf") filterDnfNotes(target.dataset.topic);
+  if (action === "toggle-main-task") toggleMainTask(targetId);
+  if (action === "collapse-all-tasks") setAllMainTasksCollapsed(true);
+  if (action === "expand-all-tasks") setAllMainTasksCollapsed(false);
   if (action === "open-template-modal") showTemplateModal();
   if (action === "close-modal") closeModal();
   if (action === "use-template") showMainTaskModal(targetId);
@@ -1019,11 +1063,33 @@ document.addEventListener("click", async (event) => {
   }
 });
 
+document.addEventListener("input", (event) => {
+  if (event.target.id === "main-task-search") {
+    tasksUi.query = event.target.value;
+    renderTasks();
+    document.querySelector("#main-task-search")?.focus();
+  }
+});
+
 function filterDnfNotes(topic) {
   document.querySelectorAll(".topic-filter").forEach((button) => button.classList.toggle("active", button.dataset.topic === topic));
   document.querySelectorAll(".dnf-note").forEach((note) => {
     note.hidden = Boolean(topic && note.dataset.topic !== topic);
   });
+}
+
+function toggleMainTask(mainTaskId) {
+  tasksUi.collapsedIds = tasksUi.collapsedIds.includes(mainTaskId)
+    ? tasksUi.collapsedIds.filter((id) => id !== mainTaskId)
+    : [...tasksUi.collapsedIds, mainTaskId];
+  saveTasksUi();
+  renderTasks();
+}
+
+function setAllMainTasksCollapsed(collapsed) {
+  tasksUi.collapsedIds = collapsed ? state.mainTasks.map((mainTask) => mainTask.id) : [];
+  saveTasksUi();
+  renderTasks();
 }
 
 document.addEventListener("change", async (event) => {
