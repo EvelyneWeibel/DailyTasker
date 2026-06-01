@@ -15,6 +15,8 @@ create table public.subtasks (
   title text not null,
   completed boolean not null default false,
   estimated_minutes integer not null default 0 check (estimated_minutes >= 0),
+  priority text not null default 'normal' check (priority in ('high', 'normal', 'low')),
+  deadline date,
   created_at timestamptz not null default now()
 );
 
@@ -25,6 +27,8 @@ create table public.step_items (
   title text not null,
   completed boolean not null default false,
   estimated_minutes integer not null default 0 check (estimated_minutes >= 0),
+  priority text not null default 'normal' check (priority in ('high', 'normal', 'low')),
+  deadline date,
   created_at timestamptz not null default now()
 );
 

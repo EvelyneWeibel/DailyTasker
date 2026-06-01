@@ -11,6 +11,9 @@ long breaks can be customized without an additional Supabase migration.
 Daily items can be marked DNF with a topic and a reason. The Today page keeps a topic-filtered
 history so recurring blockers are easy to remember.
 
+Steps and nested subtasks can have a priority and deadline. The Today page sorts unfinished
+deadline items by due date and lets you add them to today's list in one click.
+
 ## Preview locally
 
 Run a static server from this folder:
@@ -47,6 +50,9 @@ Then run `migrations/20260601_add_duration_and_daily_subtasks.sql` once to add e
 durations, allow nested subtasks on today's list, and save your preferred daily ordering.
 
 Run `migrations/20260601_add_dnf_notes.sql` once to add the topic-filtered DNF journal.
+
+Run `migrations/20260601_add_priority_and_deadlines.sql` once to add priority and deadline
+metadata for steps and nested subtasks.
 
 ## Publish with GitHub Pages
 

@@ -74,6 +74,21 @@ const durationBadge = (minutes, targetType, targetId) => {
   if (!targetType || !targetId) return `<span class="duration-badge ${durationClass(minutes)}">${content}</span>`;
   return `<button class="duration-badge ${durationClass(minutes)}" type="button" data-action="open-duration-modal" data-target-type="${targetType}" data-id="${targetId}" aria-label="Edit estimate for ${targetType}">${content}</button>`;
 };
+const priorityOrder = { high: 0, normal: 1, low: 2 };
+const priorityLabel = (priority = "normal") => `${priority.charAt(0).toUpperCase()}${priority.slice(1)} priority`;
+const priorityBadge = (priority = "normal") => `<span class="priority-badge ${priority}">${priorityLabel(priority)}</span>`;
+const deadlineBadge = (deadline) => deadline ? `<span class="deadline-badge">${deadlineLabel(deadline)}</span>` : "";
+const daysUntil = (deadline) => {
+  const dueDate = new Date(`${deadline}T12:00:00`);
+  const currentDate = new Date(`${today()}T12:00:00`);
+  return Math.round((dueDate - currentDate) / 86400000);
+};
+const deadlineLabel = (deadline) => {
+  const days = daysUntil(deadline);
+  if (days < 0) return `${Math.abs(days)} ${Math.abs(days) === 1 ? "day" : "days"} overdue`;
+  if (days === 0) return "Due today";
+  return `${days} ${days === 1 ? "day" : "days"} left`;
+};
 function loadPomodoro() {
   const saved = JSON.parse(localStorage.getItem(POMODORO_KEY) || "null");
   const settings = { ...pomodoroDefaults, ...(saved?.settings || {}) };
@@ -181,9 +196,9 @@ class DemoStore {
           title: "Launch portfolio",
           description: "A small step each day until the site is live.",
           subtasks: [
-            { id: id(), title: "Choose the best three projects", completed: false, estimatedMinutes: 20, stepItems: [] },
-            { id: id(), title: "Write a short introduction", completed: false, estimatedMinutes: 35, stepItems: [] },
-            { id: id(), title: "Pick a profile photo", completed: false, estimatedMinutes: 10, stepItems: [] },
+            { id: id(), title: "Choose the best three projects", completed: false, estimatedMinutes: 20, priority: "high", deadline: "", stepItems: [] },
+            { id: id(), title: "Write a short introduction", completed: false, estimatedMinutes: 35, priority: "normal", deadline: "", stepItems: [] },
+            { id: id(), title: "Pick a profile photo", completed: false, estimatedMinutes: 10, priority: "low", deadline: "", stepItems: [] },
           ],
         },
       ],
@@ -215,8 +230,12 @@ class DemoStore {
     data.mainTasks.forEach((mainTask) => mainTask.subtasks.forEach((subtask) => {
       subtask.stepItems ||= [];
       subtask.estimatedMinutes ||= 0;
+      subtask.priority ||= "normal";
+      subtask.deadline ||= "";
       subtask.stepItems.forEach((stepItem) => {
         stepItem.estimatedMinutes ||= 0;
+        stepItem.priority ||= "normal";
+        stepItem.deadline ||= "";
       });
     }));
     data.dailyTasks.forEach((dailyTask, index) => {
@@ -231,22 +250,22 @@ class DemoStore {
     const task = { id: id(), title: payload.title, description: payload.description, subtasks: [] };
     if (payload.templateId) {
       const template = this.data.templates.find((item) => item.id === payload.templateId);
-      task.subtasks = template.subtasks.map((item) => ({ id: id(), title: item.title, completed: false, estimatedMinutes: 0, stepItems: [] }));
+      task.subtasks = template.subtasks.map((item) => ({ id: id(), title: item.title, completed: false, estimatedMinutes: 0, priority: "normal", deadline: "", stepItems: [] }));
     }
     this.data.mainTasks.push(task);
     this.save();
   }
 
-  async createSubtask(mainTaskId, title, estimatedMinutesValue) {
+  async createSubtask(mainTaskId, title, estimatedMinutesValue, priority = "normal", deadline = "") {
     const mainTask = this.data.mainTasks.find((item) => item.id === mainTaskId);
-    mainTask.subtasks.push({ id: id(), title, completed: false, estimatedMinutes: estimatedMinutes(estimatedMinutesValue), stepItems: [] });
+    mainTask.subtasks.push({ id: id(), title, completed: false, estimatedMinutes: estimatedMinutes(estimatedMinutesValue), priority, deadline, stepItems: [] });
     this.save();
   }
 
-  async createStepItem(subtaskId, title, estimatedMinutesValue) {
+  async createStepItem(subtaskId, title, estimatedMinutesValue, priority = "normal", deadline = "") {
     const subtask = this.data.mainTasks.flatMap((item) => item.subtasks).find((item) => item.id === subtaskId);
     subtask.stepItems ||= [];
-    subtask.stepItems.push({ id: id(), title, completed: false, estimatedMinutes: estimatedMinutes(estimatedMinutesValue) });
+    subtask.stepItems.push({ id: id(), title, completed: false, estimatedMinutes: estimatedMinutes(estimatedMinutesValue), priority, deadline });
     this.save();
   }
 
@@ -259,11 +278,13 @@ class DemoStore {
     this.save();
   }
 
-  async updateEstimate(targetType, targetId, estimatedMinutesValue) {
+  async updateTaskDetails(targetType, targetId, payload) {
     const target = targetType === "step-item"
       ? this.data.mainTasks.flatMap((item) => item.subtasks).flatMap((item) => item.stepItems || []).find((item) => item.id === targetId)
       : this.data.mainTasks.flatMap((item) => item.subtasks).find((item) => item.id === targetId);
-    target.estimatedMinutes = estimatedMinutes(estimatedMinutesValue);
+    target.estimatedMinutes = estimatedMinutes(payload.estimatedMinutes);
+    target.priority = payload.priority;
+    target.deadline = payload.deadline;
     this.save();
   }
 
@@ -341,7 +362,7 @@ class SupabaseStore {
 
   async load() {
     const [mainTasks, templates, dailyTasks, dnfNotes] = await Promise.all([
-      this.client.from("main_tasks").select("id,title,description,subtasks(id,title,completed,estimated_minutes,step_items(id,title,completed,estimated_minutes))").order("created_at"),
+      this.client.from("main_tasks").select("id,title,description,subtasks(id,title,completed,estimated_minutes,priority,deadline,step_items(id,title,completed,estimated_minutes,priority,deadline))").order("created_at"),
       this.client.from("task_templates").select("id,title,description,template_subtasks(id,title)").order("created_at"),
       this.client.from("daily_tasks").select("id,subtask_id,step_item_id,task_date,sort_order").eq("task_date", today()).order("sort_order"),
       this.client.from("dnf_notes").select("id,topic,reason,task_title,task_source,task_date,created_at").order("created_at", { ascending: false }),
@@ -355,7 +376,14 @@ class SupabaseStore {
         subtasks: (task.subtasks || []).map((subtask) => ({
           ...subtask,
           estimatedMinutes: subtask.estimated_minutes || 0,
-          stepItems: (subtask.step_items || []).map((stepItem) => ({ ...stepItem, estimatedMinutes: stepItem.estimated_minutes || 0 })),
+          priority: subtask.priority || "normal",
+          deadline: subtask.deadline || "",
+          stepItems: (subtask.step_items || []).map((stepItem) => ({
+            ...stepItem,
+            estimatedMinutes: stepItem.estimated_minutes || 0,
+            priority: stepItem.priority || "normal",
+            deadline: stepItem.deadline || "",
+          })),
         })),
       })),
       templates: templates.data.map((template) => ({
@@ -399,12 +427,14 @@ class SupabaseStore {
     }
   }
 
-  async createSubtask(mainTaskId, title, estimatedMinutesValue) {
+  async createSubtask(mainTaskId, title, estimatedMinutesValue, priority = "normal", deadline = "") {
     const { error } = await this.client.from("subtasks").insert({
       user_id: await this.userId(),
       main_task_id: mainTaskId,
       title,
       estimated_minutes: estimatedMinutes(estimatedMinutesValue),
+      priority,
+      deadline: deadline || null,
     });
     if (error) throw error;
   }
@@ -414,12 +444,14 @@ class SupabaseStore {
     if (error) throw error;
   }
 
-  async createStepItem(subtaskId, title, estimatedMinutesValue) {
+  async createStepItem(subtaskId, title, estimatedMinutesValue, priority = "normal", deadline = "") {
     const { error } = await this.client.from("step_items").insert({
       user_id: await this.userId(),
       subtask_id: subtaskId,
       title,
       estimated_minutes: estimatedMinutes(estimatedMinutesValue),
+      priority,
+      deadline: deadline || null,
     });
     if (error) throw error;
   }
@@ -429,9 +461,13 @@ class SupabaseStore {
     if (error) throw error;
   }
 
-  async updateEstimate(targetType, targetId, estimatedMinutesValue) {
+  async updateTaskDetails(targetType, targetId, payload) {
     const table = targetType === "step-item" ? "step_items" : "subtasks";
-    const { error } = await this.client.from(table).update({ estimated_minutes: estimatedMinutes(estimatedMinutesValue) }).eq("id", targetId);
+    const { error } = await this.client.from(table).update({
+      estimated_minutes: estimatedMinutes(payload.estimatedMinutes),
+      priority: payload.priority,
+      deadline: payload.deadline || null,
+    }).eq("id", targetId);
     if (error) throw error;
   }
 
@@ -543,6 +579,16 @@ function dailyTaskSource({ targetType, parentStep, mainTask }) {
   return targetType === "step-item" ? `${mainTask.title} · ${parentStep.title}` : mainTask.title;
 }
 
+function metadataBadges(target, targetType, targetId) {
+  return `
+    <div class="metadata-badges">
+      ${durationBadge(target.estimatedMinutes, targetType, targetId)}
+      ${priorityBadge(target.priority)}
+      ${deadlineBadge(target.deadline)}
+    </div>
+  `;
+}
+
 function renderTaskRow(subtask, mainTask, options = {}) {
   const dailyTask = state.dailyTasks.find((item) => item.subtaskId === subtask.id);
   const stepItems = subtask.stepItems || [];
@@ -557,7 +603,7 @@ function renderTaskRow(subtask, mainTask, options = {}) {
         <input type="checkbox" data-action="toggle-subtask" data-id="${subtask.id}" ${subtask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(subtask.title)} complete" />
         <div class="task-text">
           <div class="task-name">${highlightText(subtask.title, options.query)}</div>
-          ${durationBadge(subtask.estimatedMinutes, "subtask", subtask.id)}
+          ${metadataBadges(subtask, "subtask", subtask.id)}
         </div>
         ${action}
       </div>
@@ -573,7 +619,7 @@ function renderStepItem(stepItem, query = "") {
     <div class="step-item ${stepItem.completed ? "completed" : ""}">
       <input type="checkbox" data-action="toggle-step-item" data-id="${stepItem.id}" ${stepItem.completed ? "checked" : ""} />
       <span class="step-item-title">${highlightText(stepItem.title, query)}</span>
-      ${durationBadge(stepItem.estimatedMinutes, "step-item", stepItem.id)}
+      ${metadataBadges(stepItem, "step-item", stepItem.id)}
       <button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-target-type="step-item" data-id="${stepItem.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>
     </div>
   `;
@@ -623,6 +669,7 @@ function renderToday() {
       <div class="date-card"><strong>${date.getDate()}</strong><span>${date.toLocaleDateString(undefined, { month: "short" })}</span></div>
     </section>
     ${renderPomodoro()}
+    ${renderUpcomingDeadlines()}
     <section class="section">
       <div class="section-heading">
         <div>
@@ -657,7 +704,7 @@ function renderDailyRow({ dailyTask, target, parentStep, mainTask, targetType },
         <div class="task-name">${escapeHtml(target.title)}</div>
         <div class="task-source">${escapeHtml(source)}</div>
       </div>
-      ${durationBadge(target.estimatedMinutes, targetType, target.id)}
+      ${metadataBadges(target, targetType, target.id)}
       <div class="order-actions">
         <button class="order-button" type="button" data-action="move-daily" data-direction="-1" data-id="${dailyTask.id}" ${index === 0 ? "disabled" : ""} aria-label="Move ${escapeHtml(target.title)} up">↑</button>
         <button class="order-button" type="button" data-action="move-daily" data-direction="1" data-id="${dailyTask.id}" ${index === total - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(target.title)} down">↓</button>
@@ -665,6 +712,52 @@ function renderDailyRow({ dailyTask, target, parentStep, mainTask, targetType },
       <button class="button button-small button-quiet dnf-button" type="button" data-action="open-dnf-modal" data-id="${dailyTask.id}">DNF</button>
       <button class="icon-button" type="button" data-action="remove-daily" data-id="${dailyTask.id}" aria-label="Remove ${escapeHtml(target.title)} from today">×</button>
     </div>
+  `;
+}
+
+function allActionableTasks() {
+  return state.mainTasks.flatMap((mainTask) => mainTask.subtasks.flatMap((subtask) => [
+    { target: subtask, targetType: "subtask", mainTask },
+    ...(subtask.stepItems || []).map((stepItem) => ({ target: stepItem, targetType: "step-item", parentStep: subtask, mainTask })),
+  ]));
+}
+
+function renderUpcomingDeadlines() {
+  const upcomingTasks = allActionableTasks()
+    .filter(({ target }) => target.deadline && !target.completed && daysUntil(target.deadline) <= 7)
+    .sort((a, b) => a.target.deadline.localeCompare(b.target.deadline) || priorityOrder[a.target.priority] - priorityOrder[b.target.priority]);
+  return `
+    <section class="section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Coming up</p>
+          <h2>Upcoming deadlines</h2>
+          <p>See what needs attention next and pull it into today's list when the timing feels right.</p>
+        </div>
+      </div>
+      ${
+        upcomingTasks.length
+          ? `<div class="deadline-list">${upcomingTasks.map(renderUpcomingTask).join("")}</div>`
+          : `<div class="empty-state compact-empty"><h3>No upcoming deadlines</h3><p>Add a deadline to a step or subtask and it will appear here.</p></div>`
+      }
+    </section>
+  `;
+}
+
+function renderUpcomingTask({ target, targetType, parentStep, mainTask }) {
+  const dailyTask = state.dailyTasks.find((item) => item[targetType === "step-item" ? "stepItemId" : "subtaskId"] === target.id);
+  const source = dailyTaskSource({ targetType, parentStep, mainTask });
+  return `
+    <article class="deadline-row ${daysUntil(target.deadline) < 0 ? "overdue" : ""}">
+      <div class="deadline-task">
+        <h3>${escapeHtml(target.title)}</h3>
+        <p>${escapeHtml(source)}</p>
+      </div>
+      ${priorityBadge(target.priority)}
+      ${durationBadge(target.estimatedMinutes, targetType, target.id)}
+      <strong>${deadlineLabel(target.deadline)}</strong>
+      <button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-target-type="${targetType}" data-id="${target.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>
+    </article>
   `;
 }
 
@@ -858,6 +951,8 @@ function showSubtaskModal(mainTaskId) {
       <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(mainTask.title)}</p><h2>Add a small step</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
       <label>Small task<input name="title" required autofocus placeholder="e.g. Book the train tickets" /></label>
       <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="15" /></label>
+      <label>Priority<select name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label>
+      <label>Deadline<input name="deadline" type="date" /></label>
       <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Add step</button></div>
     </form>
   `);
@@ -870,18 +965,22 @@ function showStepItemModal(subtaskId) {
       <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(subtask.title)}</p><h2>Add a subtask</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
       <label>Subtask<input name="title" required autofocus placeholder="e.g. Write the opening paragraph" /></label>
       <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="10" /></label>
+      <label>Priority<select name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label>
+      <label>Deadline<input name="deadline" type="date" /></label>
       <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Add subtask</button></div>
     </form>
   `);
 }
 
-function showDurationModal(targetType, targetId) {
+function showTaskDetailsModal(targetType, targetId) {
   const target = targetType === "step-item" ? findStepItem(targetId).stepItem : findSubtask(targetId).subtask;
   showModal(`
-    <form id="duration-form" data-id="${target.id}" data-target-type="${targetType}">
-      <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(target.title)}</p><h2>Edit estimated duration</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
+    <form id="task-details-form" data-id="${target.id}" data-target-type="${targetType}">
+      <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(target.title)}</p><h2>Edit task details</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
       <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="${estimatedMinutes(target.estimatedMinutes)}" autofocus /></label>
-      <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Save estimate</button></div>
+      <label>Priority<select name="priority"><option value="normal" ${target.priority === "normal" ? "selected" : ""}>Normal</option><option value="high" ${target.priority === "high" ? "selected" : ""}>High</option><option value="low" ${target.priority === "low" ? "selected" : ""}>Low</option></select></label>
+      <label>Deadline<input name="deadline" type="date" value="${escapeHtml(target.deadline || "")}" /></label>
+      <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Save details</button></div>
     </form>
   `);
 }
@@ -1013,15 +1112,15 @@ document.addEventListener("submit", async (event) => {
     closeModal();
   }
   if (event.target.id === "subtask-form") {
-    await run(() => store.createSubtask(event.target.dataset.id, data.title, data.estimatedMinutes), "Small step added.");
+    await run(() => store.createSubtask(event.target.dataset.id, data.title, data.estimatedMinutes, data.priority, data.deadline), "Small step added.");
     closeModal();
   }
   if (event.target.id === "step-item-form") {
-    await run(() => store.createStepItem(event.target.dataset.id, data.title, data.estimatedMinutes), "Subtask added.");
+    await run(() => store.createStepItem(event.target.dataset.id, data.title, data.estimatedMinutes, data.priority, data.deadline), "Subtask added.");
     closeModal();
   }
-  if (event.target.id === "duration-form") {
-    await run(() => store.updateEstimate(event.target.dataset.targetType, event.target.dataset.id, data.estimatedMinutes), "Estimate updated.");
+  if (event.target.id === "task-details-form") {
+    await run(() => store.updateTaskDetails(event.target.dataset.targetType, event.target.dataset.id, data), "Task details updated.");
     closeModal();
   }
   if (event.target.id === "pomodoro-settings-form") {
@@ -1059,7 +1158,7 @@ document.addEventListener("click", async (event) => {
   if (action === "open-main-task-modal") showMainTaskModal();
   if (action === "open-subtask-modal") showSubtaskModal(targetId);
   if (action === "open-step-item-modal") showStepItemModal(targetId);
-  if (action === "open-duration-modal") showDurationModal(target.dataset.targetType, targetId);
+  if (action === "open-duration-modal") showTaskDetailsModal(target.dataset.targetType, targetId);
   if (action === "open-pomodoro-settings") showPomodoroSettingsModal();
   if (action === "pomodoro-toggle") togglePomodoro();
   if (action === "pomodoro-reset") resetPomodoro();
