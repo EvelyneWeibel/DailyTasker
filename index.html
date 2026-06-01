@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Daily Tasker turns larger projects into a calm, practical list for today."
+    />
+    <title>Daily Tasker</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600;9..144,700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="site-header">
+        <a class="brand" href="#today" aria-label="Daily Tasker home">
+          <span class="brand-mark">DT</span>
+          <span>
+            <strong>Daily Tasker</strong>
+            <small>Make progress feel possible.</small>
+          </span>
+        </a>
+        <nav class="main-nav" aria-label="Main navigation">
+          <a href="#today" data-route="today">Today</a>
+          <a href="#tasks" data-route="tasks">Main tasks</a>
+          <a href="#templates" data-route="templates">Templates</a>
+        </nav>
+        <button class="button button-quiet" id="settings-button" type="button">
+          <span class="status-dot"></span>
+          <span id="settings-label">Demo mode</span>
+        </button>
+      </header>
+
+      <main id="app" tabindex="-1"></main>
+    </div>
+
+    <dialog id="settings-dialog">
+      <form class="dialog-card" method="dialog" id="settings-form">
+        <div class="dialog-heading">
+          <div>
+            <p class="eyebrow">Cloud setup</p>
+            <h2>Connect Supabase</h2>
+          </div>
+          <button class="icon-button" value="cancel" aria-label="Close settings">×</button>
+        </div>
+        <p class="dialog-copy">
+          Demo mode stores your data in this browser. Add your Supabase project details to sync
+          your real list across devices.
+        </p>
+        <label>
+          Supabase project URL
+          <input id="supabase-url" type="url" required placeholder="https://your-project.supabase.co" />
+        </label>
+        <label>
+          Supabase anon key
+          <input id="supabase-key" type="password" required placeholder="Your public anon key" />
+        </label>
+        <p class="form-note" id="settings-message"></p>
+        <div class="dialog-actions">
+          <button class="button button-quiet" id="use-demo-button" type="button">Use demo mode</button>
+          <button class="button button-primary" type="submit" value="default">Save connection</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
