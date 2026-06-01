@@ -1,6 +1,6 @@
 # Daily Tasker
 
-A static task-planning page for GitHub Pages with optional Supabase sync. Main tasks contain
+A static task-planning page for GitHub Pages with Supabase sync. Main tasks contain
 small tasks, and any small task can be added to today's focused list. Templates let you reuse
 the same default small tasks for recurring goals. Each small step can also contain a finer
 checklist of subtasks.
@@ -25,7 +25,12 @@ python -m http.server 8000
 Then open `http://localhost:8000`. The app starts in demo mode and saves preview data in the
 browser's local storage.
 
-## Connect Supabase
+## Supabase
+
+The published GitHub Pages app uses the configured Supabase project by default. The repository
+contains its public publishable key only; data access remains protected by row-level security.
+
+## Connect another Supabase project
 
 1. Create a Supabase project.
 2. Open the Supabase SQL editor and run `supabase.sql`.
@@ -33,7 +38,7 @@ browser's local storage.
 4. Set **Site URL** to `https://evelyneweibel.github.io/DailyTasker/`.
 5. Add `https://evelyneweibel.github.io/DailyTasker/` to **Redirect URLs**. For local testing,
    also add `http://localhost:8000/`.
-6. Open the app and click **Demo mode** in the top-right corner.
+6. Open the app and click **Cloud sync** in the top-right corner.
 7. Paste the project URL and public anon key from **Project Settings > API**. The project URL
    should look like `https://your-project-ref.supabase.co` without an extra path.
 8. Enter your email address and use the magic link Supabase sends you.

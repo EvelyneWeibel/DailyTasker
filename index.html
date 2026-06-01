@@ -33,7 +33,7 @@
         </nav>
         <button class="button button-quiet" id="settings-button" type="button">
           <span class="status-dot"></span>
-          <span id="settings-label">Demo mode</span>
+          <span id="settings-label">Cloud sync</span>
         </button>
       </header>
 
@@ -50,8 +50,8 @@
           <button class="icon-button" value="cancel" aria-label="Close settings">×</button>
         </div>
         <p class="dialog-copy">
-          Demo mode stores your data in this browser. Add your Supabase project details to sync
-          your real list across devices.
+          This site is connected to Supabase by default. These settings are available if you
+          need to switch to another project or temporarily preview demo data.
         </p>
         <label>
           Supabase project URL
@@ -63,7 +63,7 @@
         </label>
         <p class="form-note" id="settings-message"></p>
         <div class="dialog-actions">
-          <button class="button button-quiet" id="use-demo-button" type="button">Use demo mode</button>
+          <button class="button button-quiet" id="use-demo-button" type="button">Preview demo data</button>
           <button class="button button-primary" type="submit" value="default">Save connection</button>
         </div>
       </form>

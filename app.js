@@ -2,6 +2,10 @@ const CONFIG_KEY = "daily-tasker-supabase";
 const DEMO_KEY = "daily-tasker-demo-data";
 const POMODORO_KEY = "daily-tasker-pomodoro";
 const TASKS_UI_KEY = "daily-tasker-main-tasks-ui";
+const DEFAULT_SUPABASE_CONFIG = {
+  url: "https://ikqkqdrcmwvuphcrlvrx.supabase.co",
+  key: "sb_publishable_GBBHh6VSUK8qAEdonfcK_Q_2bvsHGvJ",
+};
 const ROUTES = ["today", "tasks", "templates"];
 const pomodoroDefaults = { focus: 25, shortBreak: 5, longBreak: 15 };
 
@@ -1064,12 +1068,7 @@ async function sortDailyTasksByDuration() {
 }
 
 async function initializeStore() {
-  const config = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null");
-  if (!config) {
-    store = new DemoStore();
-    settingsLabel.textContent = "Demo mode";
-    return refresh();
-  }
+  const config = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null") || DEFAULT_SUPABASE_CONFIG;
   const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm");
   const client = createClient(config.url, config.key);
   const { data } = await client.auth.getSession();
@@ -1092,7 +1091,7 @@ function renderAuth(client) {
       <p class="setup-note">In Supabase Auth URL Configuration, use this exact Site URL and Redirect URL:<br /><strong>${escapeHtml(authRedirectUrl())}</strong></p>
       <form id="auth-form">
         <label>Email address<input type="email" name="email" required placeholder="you@example.com" /></label>
-        <div class="auth-actions"><button class="button button-primary">Send magic link</button><button class="button button-quiet" type="button" data-action="switch-demo">Back to demo</button></div>
+        <div class="auth-actions"><button class="button button-primary">Send magic link</button></div>
       </form>
     </section>
   `;
@@ -1178,10 +1177,6 @@ document.addEventListener("click", async (event) => {
   if (action === "sort-duration") await run(sortDailyTasksByDuration, "Today's list sorted by duration.");
   if (action === "delete-main-task" && confirm("Delete this main task and its small steps?")) await run(() => store.deleteMainTask(targetId), "Main task deleted.");
   if (action === "delete-template" && confirm("Delete this template?")) await run(() => store.deleteTemplate(targetId), "Template deleted.");
-  if (action === "switch-demo") {
-    localStorage.removeItem(CONFIG_KEY);
-    window.location.reload();
-  }
 });
 
 document.addEventListener("input", (event) => {
@@ -1238,7 +1233,7 @@ document.addEventListener("change", async (event) => {
 
 window.addEventListener("hashchange", render);
 settingsButton.addEventListener("click", () => {
-  const config = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null");
+  const config = JSON.parse(localStorage.getItem(CONFIG_KEY) || "null") || DEFAULT_SUPABASE_CONFIG;
   document.querySelector("#supabase-url").value = config?.url || "";
   document.querySelector("#supabase-key").value = config?.key || "";
   settingsDialog.showModal();
@@ -1262,8 +1257,11 @@ settingsForm.addEventListener("submit", (event) => {
   window.location.reload();
 });
 document.querySelector("#use-demo-button").addEventListener("click", () => {
-  localStorage.removeItem(CONFIG_KEY);
-  window.location.reload();
+  store = new DemoStore();
+  settingsDialog.close();
+  document.body.classList.remove("cloud-mode");
+  settingsLabel.textContent = "Demo mode";
+  refresh("Demo mode enabled for this visit.");
 });
 
 startPomodoroTicker();
