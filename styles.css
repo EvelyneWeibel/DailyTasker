@@ -367,9 +367,20 @@ h3 {
 }
 
 .toolbar-actions {
+  align-items: center;
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+.search-result-count {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.main-task-card.search-hidden {
+  display: none;
 }
 
 .card,

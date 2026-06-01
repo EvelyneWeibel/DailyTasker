@@ -718,6 +718,7 @@ function renderTasks() {
         <input id="main-task-search" type="search" value="${escapeHtml(tasksUi.query)}" placeholder="Search projects, steps, or subtasks" autocomplete="off" />
       </label>
       <div class="toolbar-actions">
+        <span class="search-result-count" id="main-task-result-count">${matchingTasks.length} of ${state.mainTasks.length} shown</span>
         <button class="button button-quiet button-small" type="button" data-action="collapse-all-tasks">Reduce all</button>
         <button class="button button-quiet button-small" type="button" data-action="expand-all-tasks">Expand all</button>
       </div>
@@ -749,7 +750,7 @@ function renderMainTaskCard(mainTask, query = "") {
   const collapsed = tasksUi.collapsedIds.includes(mainTask.id);
   const hidden = !mainTaskMatchesQuery(mainTask, query);
   return `
-    <article class="card main-task-card ${collapsed ? "collapsed" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}" ${hidden ? "hidden" : ""}>
+    <article class="card main-task-card ${collapsed ? "collapsed" : ""} ${hidden ? "search-hidden" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}">
       <header class="card-header">
         <div>
           <h3>${escapeHtml(mainTask.title)}</h3>
@@ -1099,12 +1100,14 @@ function filterMainTaskCards() {
   const cards = [...document.querySelectorAll(".main-task-card")];
   let visibleCount = 0;
   cards.forEach((card) => {
-    const matches = card.dataset.search.includes(query);
-    card.hidden = !matches;
+    const matches = (card.dataset.search || "").includes(query);
+    card.classList.toggle("search-hidden", !matches);
     if (matches) visibleCount += 1;
   });
   const noResults = document.querySelector("#main-task-no-results");
   if (noResults) noResults.hidden = visibleCount > 0;
+  const resultCount = document.querySelector("#main-task-result-count");
+  if (resultCount) resultCount.textContent = `${visibleCount} of ${cards.length} shown`;
 }
 
 document.addEventListener("change", async (event) => {
