@@ -24,6 +24,8 @@ let state = {
 };
 let pomodoro = loadPomodoro();
 let pomodoroInterval;
+let dailyResetInterval;
+let loadedDailyDate;
 let tasksUi = loadTasksUi();
 
 const id = () => crypto.randomUUID();
@@ -152,6 +154,16 @@ function startPomodoroTicker() {
   window.clearInterval(pomodoroInterval);
   pomodoroInterval = window.setInterval(updatePomodoroDisplay, 1000);
   updatePomodoroDisplay();
+}
+
+function startDailyResetWatcher() {
+  window.clearInterval(dailyResetInterval);
+  dailyResetInterval = window.setInterval(async () => {
+    const currentDate = today();
+    if (currentDate === loadedDailyDate || !store) return;
+    loadedDailyDate = currentDate;
+    await refresh("A new day has started. Your daily list is fresh.");
+  }, 60000);
 }
 
 function togglePomodoro() {
@@ -497,7 +509,7 @@ function renderToday() {
       <div>
         <p class="eyebrow">Today's gentle focus</p>
         <h1>A little progress goes a long way.</h1>
-        <p class="page-intro">Choose small, finishable steps from your bigger tasks. This is your list for today.</p>
+        <p class="page-intro">Choose small, finishable steps from your bigger tasks. This list resets automatically every morning.</p>
       </div>
       <div class="date-card"><strong>${date.getDate()}</strong><span>${date.toLocaleDateString(undefined, { month: "short" })}</span></div>
     </section>
@@ -860,6 +872,7 @@ function showTemplateModal() {
 }
 
 async function refresh(message) {
+  loadedDailyDate = today();
   state = await store.load();
   render();
   if (message) showToast(message);
@@ -1085,6 +1098,7 @@ settingsForm.addEventListener("submit", (event) => {
   window.location.reload();
 });
 startPomodoroTicker();
+startDailyResetWatcher();
 initializeStore().catch((error) => {
   console.error(error);
   document.querySelector("#settings-message").textContent = error.message;
