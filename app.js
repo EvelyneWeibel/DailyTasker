@@ -49,6 +49,13 @@ const escapeHtml = (value = "") =>
     const entities = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" };
     return entities[character];
   });
+const highlightText = (value = "", query = "") => {
+  if (!query) return escapeHtml(value);
+  const escapedValue = escapeHtml(value);
+  const escapedQuery = escapeHtml(query);
+  return escapedValue.replace(new RegExp(`(${escapeRegExp(escapedQuery)})`, "gi"), "<mark>$1</mark>");
+};
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const estimatedMinutes = (value) => Number(value) || 0;
 const durationLabel = (minutes) => {
   if (!estimatedMinutes(minutes)) return "No estimate";
@@ -539,29 +546,33 @@ function dailyTaskSource({ targetType, parentStep, mainTask }) {
 function renderTaskRow(subtask, mainTask, options = {}) {
   const dailyTask = state.dailyTasks.find((item) => item.subtaskId === subtask.id);
   const stepItems = subtask.stepItems || [];
+  const visibleStepItems = options.query
+    ? stepItems.filter((stepItem) => stepItem.title.toLowerCase().includes(options.query))
+    : stepItems;
+  const showAllStepItems = !options.query || subtask.title.toLowerCase().includes(options.query);
   const action = `<button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-target-type="subtask" data-id="${subtask.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>`;
   return `
     <div class="task-group">
       <div class="task-row ${subtask.completed ? "completed" : ""}">
         <input type="checkbox" data-action="toggle-subtask" data-id="${subtask.id}" ${subtask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(subtask.title)} complete" />
         <div class="task-text">
-          <div class="task-name">${escapeHtml(subtask.title)}</div>
+          <div class="task-name">${highlightText(subtask.title, options.query)}</div>
           ${durationBadge(subtask.estimatedMinutes, "subtask", subtask.id)}
         </div>
         ${action}
       </div>
-      ${stepItems.length ? `<div class="step-item-list">${stepItems.map((stepItem) => renderStepItem(stepItem)).join("")}</div>` : ""}
+      ${stepItems.length ? `<div class="step-item-list">${(showAllStepItems ? stepItems : visibleStepItems).map((stepItem) => renderStepItem(stepItem, options.query)).join("")}</div>` : ""}
       <button class="add-step-item" type="button" data-action="open-step-item-modal" data-id="${subtask.id}">+ Add subtask</button>
     </div>
   `;
 }
 
-function renderStepItem(stepItem) {
+function renderStepItem(stepItem, query = "") {
   const dailyTask = state.dailyTasks.find((item) => item.stepItemId === stepItem.id);
   return `
     <div class="step-item ${stepItem.completed ? "completed" : ""}">
       <input type="checkbox" data-action="toggle-step-item" data-id="${stepItem.id}" ${stepItem.completed ? "checked" : ""} />
-      <span class="step-item-title">${escapeHtml(stepItem.title)}</span>
+      <span class="step-item-title">${highlightText(stepItem.title, query)}</span>
       ${durationBadge(stepItem.estimatedMinutes, "step-item", stepItem.id)}
       <button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-target-type="step-item" data-id="${stepItem.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>
     </div>
@@ -725,7 +736,7 @@ function renderTasks() {
     </section>
     ${
       state.mainTasks.length
-        ? `<div class="grid" id="main-task-grid">${state.mainTasks.map((mainTask) => renderMainTaskCard(mainTask, query)).join("")}</div>
+        ? `<div class="main-task-list" id="main-task-grid">${state.mainTasks.map((mainTask) => renderMainTaskCard(mainTask, query)).join("")}</div>
            <div class="empty-state" id="main-task-no-results" ${matchingTasks.length ? "hidden" : ""}><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
         : `<div class="empty-state"><h2>No main tasks yet</h2><p>Create a main task from scratch or use one of your templates.</p><div class="empty-state-actions"><button class="button button-primary" type="button" data-action="open-main-task-modal">Create a main task</button></div></div>`
     }
@@ -747,18 +758,21 @@ function mainTaskSearchText(mainTask) {
 
 function renderMainTaskCard(mainTask, query = "") {
   const completed = mainTask.subtasks.filter((item) => item.completed).length;
-  const collapsed = tasksUi.collapsedIds.includes(mainTask.id);
+  const collapsed = !query && tasksUi.collapsedIds.includes(mainTask.id);
   const hidden = !mainTaskMatchesQuery(mainTask, query);
+  const visibleSubtasks = query ? mainTask.subtasks.filter((subtask) => subtaskMatchesQuery(subtask, query)) : mainTask.subtasks;
+  const matchedProject = query && `${mainTask.title} ${mainTask.description}`.toLowerCase().includes(query);
   return `
     <article class="card main-task-card ${collapsed ? "collapsed" : ""} ${hidden ? "search-hidden" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}">
       <header class="card-header">
         <div>
-          <h3>${escapeHtml(mainTask.title)}</h3>
-          <p>${escapeHtml(mainTask.description || `${mainTask.subtasks.length} small steps`)}</p>
+          <h3>${highlightText(mainTask.title, query)}</h3>
+          <p>${highlightText(mainTask.description || `${mainTask.subtasks.length} small steps`, query)}</p>
+          ${query ? `<span class="match-summary">${matchedProject ? "Project match" : `${visibleSubtasks.length} matching ${visibleSubtasks.length === 1 ? "step" : "steps"}`}</span>` : ""}
         </div>
         <button class="collapse-button" type="button" data-action="toggle-main-task" data-id="${mainTask.id}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Reduce"} ${escapeHtml(mainTask.title)}">${collapsed ? "+" : "−"}</button>
       </header>
-      <div class="task-list main-task-details">${mainTask.subtasks.map((subtask) => renderTaskRow(subtask, mainTask)).join("")}</div>
+      <div class="task-list main-task-details">${(query && !matchedProject ? visibleSubtasks : mainTask.subtasks).map((subtask) => renderTaskRow(subtask, mainTask, { query })).join("")}</div>
       <div class="card-actions">
         <span class="card-meta">${completed}/${mainTask.subtasks.length} done</span>
         <div class="main-task-details">
@@ -768,6 +782,10 @@ function renderMainTaskCard(mainTask, query = "") {
       </div>
     </article>
   `;
+}
+
+function subtaskMatchesQuery(subtask, query) {
+  return [subtask.title, ...(subtask.stepItems || []).map((stepItem) => stepItem.title)].join(" ").toLowerCase().includes(query);
 }
 
 function renderTemplates() {

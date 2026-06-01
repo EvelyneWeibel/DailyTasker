@@ -354,6 +354,11 @@ h3 {
   gap: 15px;
 }
 
+.main-task-list {
+  display: grid;
+  gap: 12px;
+}
+
 .task-toolbar {
   display: flex;
   align-items: end;
@@ -381,6 +386,10 @@ h3 {
 
 .main-task-card.search-hidden {
   display: none;
+}
+
+.main-task-card {
+  width: 100%;
 }
 
 .card,
@@ -427,6 +436,12 @@ h3 {
   margin-bottom: 8px;
 }
 
+.main-task-card.collapsed {
+  padding-top: 14px;
+  padding-bottom: 14px;
+  box-shadow: 0 8px 24px rgba(61, 72, 65, 0.07);
+}
+
 .main-task-card.collapsed > .main-task-details,
 .main-task-card.collapsed .card-actions .main-task-details {
   display: none;
@@ -443,6 +458,24 @@ h3 {
   margin: 0;
   color: var(--ink-soft);
   font-size: 13px;
+}
+
+.match-summary {
+  display: inline-flex;
+  margin-top: 7px;
+  padding: 4px 7px;
+  color: var(--sage-dark);
+  border-radius: 999px;
+  background: var(--sage-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+mark {
+  padding: 0 2px;
+  color: var(--ink);
+  border-radius: 3px;
+  background: var(--yellow);
 }
 
 .card-actions {
