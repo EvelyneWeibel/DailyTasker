@@ -312,6 +312,11 @@ h3 {
   gap: 9px;
 }
 
+.task-group {
+  display: grid;
+  gap: 7px;
+}
+
 .task-row {
   min-height: 52px;
   gap: 10px;
@@ -330,6 +335,46 @@ h3 {
 .task-row.completed .task-name {
   color: var(--ink-soft);
   text-decoration: line-through;
+}
+
+.step-item-list {
+  display: grid;
+  gap: 5px;
+  padding-left: 29px;
+}
+
+.step-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.step-item input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--sage);
+}
+
+.step-item.completed span {
+  text-decoration: line-through;
+}
+
+.add-step-item {
+  justify-self: start;
+  margin-left: 29px;
+  padding: 0;
+  color: var(--sage);
+  border: 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.add-step-item:hover {
+  color: var(--sage-dark);
 }
 
 .task-source {

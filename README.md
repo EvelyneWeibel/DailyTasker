@@ -2,7 +2,8 @@
 
 A static task-planning page for GitHub Pages with optional Supabase sync. Main tasks contain
 small tasks, and any small task can be added to today's focused list. Templates let you reuse
-the same default small tasks for recurring goals.
+the same default small tasks for recurring goals. Each small step can also contain a finer
+checklist of subtasks.
 
 ## Preview locally
 
@@ -30,6 +31,11 @@ browser's local storage.
 
 The browser stores only the public anon key. Row-level security policies keep each signed-in
 user's data private.
+
+## Update an existing Supabase project
+
+If you set up Supabase before nested subtasks were added, run
+`migrations/20260601_add_step_items.sql` once in the Supabase SQL editor.
 
 ## Publish with GitHub Pages
 

@@ -60,9 +60,9 @@ class DemoStore {
           title: "Launch portfolio",
           description: "A small step each day until the site is live.",
           subtasks: [
-            { id: id(), title: "Choose the best three projects", completed: false },
-            { id: id(), title: "Write a short introduction", completed: false },
-            { id: id(), title: "Pick a profile photo", completed: false },
+            { id: id(), title: "Choose the best three projects", completed: false, stepItems: [] },
+            { id: id(), title: "Write a short introduction", completed: false, stepItems: [] },
+            { id: id(), title: "Pick a profile photo", completed: false, stepItems: [] },
           ],
         },
       ],
@@ -90,6 +90,9 @@ class DemoStore {
 
   async load() {
     const data = structuredClone(this.data);
+    data.mainTasks.forEach((mainTask) => mainTask.subtasks.forEach((subtask) => {
+      subtask.stepItems ||= [];
+    }));
     data.dailyTasks = data.dailyTasks.filter((item) => item.taskDate === today());
     return data;
   }
@@ -98,7 +101,7 @@ class DemoStore {
     const task = { id: id(), title: payload.title, description: payload.description, subtasks: [] };
     if (payload.templateId) {
       const template = this.data.templates.find((item) => item.id === payload.templateId);
-      task.subtasks = template.subtasks.map((item) => ({ id: id(), title: item.title, completed: false }));
+      task.subtasks = template.subtasks.map((item) => ({ id: id(), title: item.title, completed: false, stepItems: [] }));
     }
     this.data.mainTasks.push(task);
     this.save();
@@ -106,7 +109,23 @@ class DemoStore {
 
   async createSubtask(mainTaskId, title) {
     const mainTask = this.data.mainTasks.find((item) => item.id === mainTaskId);
-    mainTask.subtasks.push({ id: id(), title, completed: false });
+    mainTask.subtasks.push({ id: id(), title, completed: false, stepItems: [] });
+    this.save();
+  }
+
+  async createStepItem(subtaskId, title) {
+    const subtask = this.data.mainTasks.flatMap((item) => item.subtasks).find((item) => item.id === subtaskId);
+    subtask.stepItems ||= [];
+    subtask.stepItems.push({ id: id(), title, completed: false });
+    this.save();
+  }
+
+  async toggleStepItem(stepItemId, completed) {
+    const stepItem = this.data.mainTasks
+      .flatMap((item) => item.subtasks)
+      .flatMap((item) => item.stepItems || [])
+      .find((item) => item.id === stepItemId);
+    stepItem.completed = completed;
     this.save();
   }
 
@@ -159,7 +178,7 @@ class SupabaseStore {
 
   async load() {
     const [mainTasks, templates, dailyTasks] = await Promise.all([
-      this.client.from("main_tasks").select("id,title,description,subtasks(id,title,completed)").order("created_at"),
+      this.client.from("main_tasks").select("id,title,description,subtasks(id,title,completed,step_items(id,title,completed))").order("created_at"),
       this.client.from("task_templates").select("id,title,description,template_subtasks(id,title)").order("created_at"),
       this.client.from("daily_tasks").select("id,subtask_id,task_date").eq("task_date", today()),
     ]);
@@ -167,7 +186,10 @@ class SupabaseStore {
       if (error) throw error;
     });
     return {
-      mainTasks: mainTasks.data.map((task) => ({ ...task, subtasks: task.subtasks || [] })),
+      mainTasks: mainTasks.data.map((task) => ({
+        ...task,
+        subtasks: (task.subtasks || []).map((subtask) => ({ ...subtask, stepItems: subtask.step_items || [] })),
+      })),
       templates: templates.data.map((template) => ({
         ...template,
         subtasks: template.template_subtasks || [],
@@ -209,6 +231,20 @@ class SupabaseStore {
 
   async toggleSubtask(subtaskId, completed) {
     const { error } = await this.client.from("subtasks").update({ completed }).eq("id", subtaskId);
+    if (error) throw error;
+  }
+
+  async createStepItem(subtaskId, title) {
+    const { error } = await this.client.from("step_items").insert({
+      user_id: await this.userId(),
+      subtask_id: subtaskId,
+      title,
+    });
+    if (error) throw error;
+  }
+
+  async toggleStepItem(stepItemId, completed) {
+    const { error } = await this.client.from("step_items").update({ completed }).eq("id", stepItemId);
     if (error) throw error;
   }
 
@@ -272,18 +308,32 @@ function findSubtask(subtaskId) {
 
 function renderTaskRow(subtask, mainTask, options = {}) {
   const dailyTask = state.dailyTasks.find((item) => item.subtaskId === subtask.id);
+  const stepItems = subtask.stepItems || [];
   const action = options.today
     ? `<button class="icon-button" type="button" data-action="remove-daily" data-id="${dailyTask.id}" aria-label="Remove ${escapeHtml(subtask.title)} from today">×</button>`
     : `<button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-id="${subtask.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>`;
   return `
-    <div class="task-row ${subtask.completed ? "completed" : ""}">
-      <input type="checkbox" data-action="toggle-subtask" data-id="${subtask.id}" ${subtask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(subtask.title)} complete" />
-      <div class="task-text">
-        <div class="task-name">${escapeHtml(subtask.title)}</div>
-        ${options.today ? `<div class="task-source">${escapeHtml(mainTask.title)}</div>` : ""}
+    <div class="task-group">
+      <div class="task-row ${subtask.completed ? "completed" : ""}">
+        <input type="checkbox" data-action="toggle-subtask" data-id="${subtask.id}" ${subtask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(subtask.title)} complete" />
+        <div class="task-text">
+          <div class="task-name">${escapeHtml(subtask.title)}</div>
+          ${options.today ? `<div class="task-source">${escapeHtml(mainTask.title)}</div>` : ""}
+        </div>
+        ${action}
       </div>
-      ${action}
+      ${stepItems.length ? `<div class="step-item-list">${stepItems.map(renderStepItem).join("")}</div>` : ""}
+      <button class="add-step-item" type="button" data-action="open-step-item-modal" data-id="${subtask.id}">+ Add subtask</button>
     </div>
+  `;
+}
+
+function renderStepItem(stepItem) {
+  return `
+    <label class="step-item ${stepItem.completed ? "completed" : ""}">
+      <input type="checkbox" data-action="toggle-step-item" data-id="${stepItem.id}" ${stepItem.completed ? "checked" : ""} />
+      <span>${escapeHtml(stepItem.title)}</span>
+    </label>
   `;
 }
 
@@ -433,6 +483,17 @@ function showSubtaskModal(mainTaskId) {
   `);
 }
 
+function showStepItemModal(subtaskId) {
+  const { subtask } = findSubtask(subtaskId);
+  showModal(`
+    <form id="step-item-form" data-id="${subtask.id}">
+      <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(subtask.title)}</p><h2>Add a subtask</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
+      <label>Subtask<input name="title" required autofocus placeholder="e.g. Write the opening paragraph" /></label>
+      <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Add subtask</button></div>
+    </form>
+  `);
+}
+
 function showTemplateModal() {
   showModal(`
     <form id="template-form">
@@ -513,6 +574,10 @@ document.addEventListener("submit", async (event) => {
     await run(() => store.createSubtask(event.target.dataset.id, data.title), "Small step added.");
     closeModal();
   }
+  if (event.target.id === "step-item-form") {
+    await run(() => store.createStepItem(event.target.dataset.id, data.title), "Subtask added.");
+    closeModal();
+  }
   if (event.target.id === "template-form") {
     data.subtasks = data.subtasks.split("\n").map((item) => item.trim()).filter(Boolean);
     await run(() => store.createTemplate(data), "Template saved.");
@@ -526,6 +591,7 @@ document.addEventListener("click", async (event) => {
   const { action, id: targetId } = target.dataset;
   if (action === "open-main-task-modal") showMainTaskModal();
   if (action === "open-subtask-modal") showSubtaskModal(targetId);
+  if (action === "open-step-item-modal") showStepItemModal(targetId);
   if (action === "open-template-modal") showTemplateModal();
   if (action === "close-modal") closeModal();
   if (action === "use-template") showMainTaskModal(targetId);
@@ -542,6 +608,9 @@ document.addEventListener("click", async (event) => {
 document.addEventListener("change", async (event) => {
   if (event.target.dataset.action === "toggle-subtask") {
     await run(() => store.toggleSubtask(event.target.dataset.id, event.target.checked), event.target.checked ? "Nice work. One step done." : "Step reopened.");
+  }
+  if (event.target.dataset.action === "toggle-step-item") {
+    await run(() => store.toggleStepItem(event.target.dataset.id, event.target.checked), event.target.checked ? "Subtask complete." : "Subtask reopened.");
   }
 });
 

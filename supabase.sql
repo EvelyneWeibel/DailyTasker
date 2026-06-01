@@ -17,6 +17,15 @@ create table public.subtasks (
   created_at timestamptz not null default now()
 );
 
+create table public.step_items (
+  id uuid primary key default uuid_generate_v4(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  subtask_id uuid not null references public.subtasks(id) on delete cascade,
+  title text not null,
+  completed boolean not null default false,
+  created_at timestamptz not null default now()
+);
+
 create table public.task_templates (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -44,6 +53,7 @@ create table public.daily_tasks (
 
 alter table public.main_tasks enable row level security;
 alter table public.subtasks enable row level security;
+alter table public.step_items enable row level security;
 alter table public.task_templates enable row level security;
 alter table public.template_subtasks enable row level security;
 alter table public.daily_tasks enable row level security;
@@ -52,6 +62,9 @@ create policy "Users manage their own main tasks" on public.main_tasks
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create policy "Users manage their own subtasks" on public.subtasks
+  for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create policy "Users manage their own step items" on public.step_items
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
 create policy "Users manage their own templates" on public.task_templates
