@@ -1,6 +1,8 @@
 const CONFIG_KEY = "daily-tasker-supabase";
 const DEMO_KEY = "daily-tasker-demo-data";
+const POMODORO_KEY = "daily-tasker-pomodoro";
 const ROUTES = ["today", "tasks", "templates"];
+const pomodoroDefaults = { focus: 25, shortBreak: 5, longBreak: 15 };
 
 const app = document.querySelector("#app");
 const settingsDialog = document.querySelector("#settings-dialog");
@@ -15,6 +17,8 @@ let state = {
   templates: [],
   dailyTasks: [],
 };
+let pomodoro = loadPomodoro();
+let pomodoroInterval;
 
 const id = () => crypto.randomUUID();
 const authRedirectUrl = () => {
@@ -60,6 +64,86 @@ const durationBadge = (minutes, targetType, targetId) => {
   if (!targetType || !targetId) return `<span class="duration-badge ${durationClass(minutes)}">${content}</span>`;
   return `<button class="duration-badge ${durationClass(minutes)}" type="button" data-action="open-duration-modal" data-target-type="${targetType}" data-id="${targetId}" aria-label="Edit estimate for ${targetType}">${content}</button>`;
 };
+function loadPomodoro() {
+  const saved = JSON.parse(localStorage.getItem(POMODORO_KEY) || "null");
+  const settings = { ...pomodoroDefaults, ...(saved?.settings || {}) };
+  return {
+    settings,
+    mode: saved?.mode || "focus",
+    remainingSeconds: saved?.remainingSeconds ?? settings.focus * 60,
+    endAt: saved?.endAt || null,
+    running: Boolean(saved?.running && saved?.endAt),
+  };
+}
+
+function savePomodoro() {
+  localStorage.setItem(POMODORO_KEY, JSON.stringify(pomodoro));
+}
+
+function pomodoroMinutes(mode = pomodoro.mode) {
+  return pomodoro.settings[mode];
+}
+
+function formatTimer(seconds) {
+  const safeSeconds = Math.max(0, seconds);
+  return `${String(Math.floor(safeSeconds / 60)).padStart(2, "0")}:${String(safeSeconds % 60).padStart(2, "0")}`;
+}
+
+function currentPomodoroSeconds() {
+  if (!pomodoro.running || !pomodoro.endAt) return pomodoro.remainingSeconds;
+  return Math.max(0, Math.ceil((pomodoro.endAt - Date.now()) / 1000));
+}
+
+function updatePomodoroDisplay() {
+  const seconds = currentPomodoroSeconds();
+  const clock = document.querySelector("#pomodoro-clock");
+  const startButton = document.querySelector("#pomodoro-start");
+  if (clock) clock.textContent = formatTimer(seconds);
+  if (startButton) startButton.textContent = pomodoro.running ? "Pause" : "Start";
+  if (currentRoute() === "today") document.title = `${formatTimer(seconds)} | Daily Tasker`;
+  if (pomodoro.running && seconds === 0) {
+    pomodoro.running = false;
+    pomodoro.endAt = null;
+    pomodoro.remainingSeconds = pomodoroMinutes() * 60;
+    savePomodoro();
+    if (clock) clock.textContent = formatTimer(pomodoro.remainingSeconds);
+    showToast(pomodoro.mode === "focus" ? "Focus session complete. Time for a break." : "Break complete. Ready when you are.");
+  }
+}
+
+function startPomodoroTicker() {
+  window.clearInterval(pomodoroInterval);
+  pomodoroInterval = window.setInterval(updatePomodoroDisplay, 1000);
+  updatePomodoroDisplay();
+}
+
+function togglePomodoro() {
+  if (pomodoro.running) {
+    pomodoro.remainingSeconds = currentPomodoroSeconds();
+    pomodoro.running = false;
+    pomodoro.endAt = null;
+  } else {
+    if (!pomodoro.remainingSeconds) pomodoro.remainingSeconds = pomodoroMinutes() * 60;
+    pomodoro.running = true;
+    pomodoro.endAt = Date.now() + pomodoro.remainingSeconds * 1000;
+  }
+  savePomodoro();
+  updatePomodoroDisplay();
+}
+
+function resetPomodoro() {
+  pomodoro.running = false;
+  pomodoro.endAt = null;
+  pomodoro.remainingSeconds = pomodoroMinutes() * 60;
+  savePomodoro();
+  updatePomodoroDisplay();
+}
+
+function selectPomodoroMode(mode) {
+  pomodoro.mode = mode;
+  resetPomodoro();
+  render();
+}
 
 class DemoStore {
   constructor() {
@@ -428,6 +512,34 @@ function renderStepItem(stepItem) {
   `;
 }
 
+function renderPomodoro() {
+  const modeLabels = { focus: "Focus", shortBreak: "Short break", longBreak: "Long break" };
+  return `
+    <section class="pomodoro-card">
+      <div class="pomodoro-copy">
+        <p class="eyebrow">Pomodoro timer</p>
+        <h2>One focused session.</h2>
+        <p>Choose a timer, start when you are ready, and give one task your attention.</p>
+        <div class="pomodoro-modes">
+          ${Object.entries(modeLabels).map(([mode, label]) => `
+            <button class="pomodoro-mode ${pomodoro.mode === mode ? "active" : ""}" type="button" data-action="pomodoro-mode" data-mode="${mode}">
+              ${label}<span>${pomodoro.settings[mode]} min</span>
+            </button>
+          `).join("")}
+        </div>
+      </div>
+      <div class="pomodoro-timer">
+        <strong id="pomodoro-clock">${formatTimer(currentPomodoroSeconds())}</strong>
+        <div class="pomodoro-actions">
+          <button class="button button-primary" id="pomodoro-start" type="button" data-action="pomodoro-toggle">${pomodoro.running ? "Pause" : "Start"}</button>
+          <button class="button button-quiet" type="button" data-action="pomodoro-reset">Reset</button>
+          <button class="button button-quiet" type="button" data-action="open-pomodoro-settings">Customize</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderToday() {
   const dailyItems = state.dailyTasks.map(resolveDailyTask).filter(Boolean).sort((a, b) => a.dailyTask.sortOrder - b.dailyTask.sortOrder);
   const completed = dailyItems.filter(({ target }) => target.completed).length;
@@ -443,6 +555,7 @@ function renderToday() {
       </div>
       <div class="date-card"><strong>${date.getDate()}</strong><span>${date.toLocaleDateString(undefined, { month: "short" })}</span></div>
     </section>
+    ${renderPomodoro()}
     <section class="section">
       <div class="section-heading">
         <div>
@@ -561,6 +674,8 @@ function renderTemplateCard(template) {
 function render() {
   document.querySelectorAll(".main-nav a").forEach((link) => link.classList.toggle("active", link.dataset.route === currentRoute()));
   ({ today: renderToday, tasks: renderTasks, templates: renderTemplates })[currentRoute()]();
+  if (currentRoute() === "today") updatePomodoroDisplay();
+  else document.title = "Daily Tasker";
 }
 
 function showModal(content) {
@@ -614,6 +729,19 @@ function showDurationModal(targetType, targetId) {
       <div class="dialog-heading"><div><p class="eyebrow">${escapeHtml(target.title)}</p><h2>Edit estimated duration</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
       <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="${estimatedMinutes(target.estimatedMinutes)}" autofocus /></label>
       <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Save estimate</button></div>
+    </form>
+  `);
+}
+
+function showPomodoroSettingsModal() {
+  showModal(`
+    <form id="pomodoro-settings-form">
+      <div class="dialog-heading"><div><p class="eyebrow">Pomodoro timer</p><h2>Customize your sessions</h2></div><button class="icon-button" type="button" data-action="close-modal" aria-label="Close">×</button></div>
+      <p class="dialog-copy">Set the number of minutes that feels useful for your rhythm. You can change these whenever you need.</p>
+      <label>Focus session<input name="focus" type="number" min="1" max="180" required value="${pomodoro.settings.focus}" /></label>
+      <label>Short break<input name="shortBreak" type="number" min="1" max="60" required value="${pomodoro.settings.shortBreak}" /></label>
+      <label>Long break<input name="longBreak" type="number" min="1" max="120" required value="${pomodoro.settings.longBreak}" /></label>
+      <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Save timer settings</button></div>
     </form>
   `);
 }
@@ -727,6 +855,17 @@ document.addEventListener("submit", async (event) => {
     await run(() => store.updateEstimate(event.target.dataset.targetType, event.target.dataset.id, data.estimatedMinutes), "Estimate updated.");
     closeModal();
   }
+  if (event.target.id === "pomodoro-settings-form") {
+    pomodoro.settings = {
+      focus: Number(data.focus),
+      shortBreak: Number(data.shortBreak),
+      longBreak: Number(data.longBreak),
+    };
+    resetPomodoro();
+    closeModal();
+    render();
+    showToast("Timer settings saved.");
+  }
   if (event.target.id === "template-form") {
     data.subtasks = data.subtasks.split("\n").map((item) => item.trim()).filter(Boolean);
     await run(() => store.createTemplate(data), "Template saved.");
@@ -742,6 +881,10 @@ document.addEventListener("click", async (event) => {
   if (action === "open-subtask-modal") showSubtaskModal(targetId);
   if (action === "open-step-item-modal") showStepItemModal(targetId);
   if (action === "open-duration-modal") showDurationModal(target.dataset.targetType, targetId);
+  if (action === "open-pomodoro-settings") showPomodoroSettingsModal();
+  if (action === "pomodoro-toggle") togglePomodoro();
+  if (action === "pomodoro-reset") resetPomodoro();
+  if (action === "pomodoro-mode") selectPomodoroMode(target.dataset.mode);
   if (action === "open-template-modal") showTemplateModal();
   if (action === "close-modal") closeModal();
   if (action === "use-template") showMainTaskModal(targetId);
@@ -796,6 +939,7 @@ document.querySelector("#use-demo-button").addEventListener("click", () => {
   window.location.reload();
 });
 
+startPomodoroTicker();
 initializeStore().catch((error) => {
   console.error(error);
   document.querySelector("#settings-message").textContent = error.message;

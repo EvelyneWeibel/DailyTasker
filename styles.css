@@ -259,6 +259,83 @@ h3 {
   margin-top: 30px;
 }
 
+.pomodoro-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 24px;
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at right top, rgba(244, 164, 123, 0.2), transparent 18rem),
+    rgba(255, 253, 248, 0.86);
+  box-shadow: var(--shadow);
+}
+
+.pomodoro-copy h2 {
+  margin-bottom: 4px;
+}
+
+.pomodoro-copy p:not(.eyebrow) {
+  margin-bottom: 0;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.pomodoro-modes,
+.pomodoro-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.pomodoro-modes {
+  margin-top: 15px;
+}
+
+.pomodoro-mode {
+  display: grid;
+  gap: 2px;
+  padding: 8px 11px;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--paper);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+}
+
+.pomodoro-mode span {
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.pomodoro-mode:hover,
+.pomodoro-mode.active {
+  color: var(--sage-dark);
+  border-color: var(--sage);
+  background: var(--sage-soft);
+}
+
+.pomodoro-timer {
+  display: grid;
+  align-content: center;
+  justify-items: end;
+  gap: 10px;
+  min-width: 252px;
+}
+
+.pomodoro-timer strong {
+  color: var(--sage-dark);
+  font-family: "Fraunces", serif;
+  font-size: clamp(48px, 7vw, 72px);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.06em;
+  line-height: 0.9;
+}
+
 .section-heading {
   justify-content: space-between;
   gap: 14px;
@@ -696,5 +773,14 @@ select:focus {
 
   .date-card {
     min-width: 90px;
+  }
+
+  .pomodoro-card {
+    grid-template-columns: 1fr;
+  }
+
+  .pomodoro-timer {
+    justify-items: start;
+    min-width: 0;
   }
 }

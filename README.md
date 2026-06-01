@@ -5,6 +5,9 @@ small tasks, and any small task can be added to today's focused list. Templates 
 the same default small tasks for recurring goals. Each small step can also contain a finer
 checklist of subtasks.
 
+The Today page also includes a browser-local Pomodoro timer. Focus sessions, short breaks, and
+long breaks can be customized without an additional Supabase migration.
+
 ## Preview locally
 
 Run a static server from this folder:
