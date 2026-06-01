@@ -22,8 +22,8 @@ Run a static server from this folder:
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000`. The app starts in demo mode and saves preview data in the
-browser's local storage.
+Then open `http://localhost:8000`. The app connects to the configured Supabase project and
+shows the email login screen when you are signed out.
 
 ## Supabase
 
