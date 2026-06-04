@@ -116,11 +116,11 @@ function loadPomodoro() {
 
 function loadTasksUi() {
   const saved = JSON.parse(localStorage.getItem(TASKS_UI_KEY) || "null");
-  return { query: "", collapsedIds: saved?.collapsedIds || [] };
+  return { query: "", collapsedIds: saved?.collapsedIds || [], showCompleted: saved?.showCompleted || false };
 }
 
 function saveTasksUi() {
-  localStorage.setItem(TASKS_UI_KEY, JSON.stringify({ collapsedIds: tasksUi.collapsedIds }));
+  localStorage.setItem(TASKS_UI_KEY, JSON.stringify({ collapsedIds: tasksUi.collapsedIds, showCompleted: tasksUi.showCompleted }));
 }
 
 function savePomodoro() {
@@ -836,7 +836,9 @@ function renderDnfNote(note) {
 
 function renderTasks() {
   const query = tasksUi.query.trim().toLowerCase();
-  const matchingTasks = state.mainTasks.filter((mainTask) => mainTaskMatchesQuery(mainTask, query));
+  const visibleMainTasks = state.mainTasks.filter((mainTask) => tasksUi.showCompleted || !mainTask.completed);
+  const matchingTasks = visibleMainTasks.filter((mainTask) => mainTaskMatchesQuery(mainTask, query));
+  const hiddenCompleted = state.mainTasks.length - visibleMainTasks.length;
   app.innerHTML = `
     <section class="page-title-row">
       <div>
@@ -853,6 +855,7 @@ function renderTasks() {
       </label>
       <div class="toolbar-actions">
         <span class="search-result-count" id="main-task-result-count">${matchingTasks.length} of ${state.mainTasks.length} shown</span>
+        <button class="button button-quiet button-small" type="button" data-action="toggle-completed-main-tasks">${tasksUi.showCompleted ? "Hide completed" : `Show completed${hiddenCompleted ? ` (${hiddenCompleted})` : ""}`}</button>
         <button class="button button-quiet button-small" type="button" data-action="sort-main-tasks-name">Sort by name</button>
         <button class="button button-quiet button-small" type="button" data-action="collapse-all-tasks">Reduce all</button>
         <button class="button button-quiet button-small" type="button" data-action="expand-all-tasks">Expand all</button>
@@ -860,7 +863,7 @@ function renderTasks() {
     </section>
     ${
       state.mainTasks.length
-        ? `<div class="main-task-list" id="main-task-grid">${state.mainTasks.map((mainTask) => renderMainTaskCard(mainTask, query)).join("")}</div>
+        ? `<div class="main-task-list" id="main-task-grid">${visibleMainTasks.map((mainTask) => renderMainTaskCard(mainTask, query)).join("")}</div>
            <div class="empty-state" id="main-task-no-results" ${matchingTasks.length ? "hidden" : ""}><h2>No matching tasks</h2><p>Try another search term or clear the search field.</p></div>`
         : `<div class="empty-state"><h2>No main tasks yet</h2><p>Create a main task from scratch or use one of your templates.</p><div class="empty-state-actions"><button class="button button-primary" type="button" data-action="open-main-task-modal">Create a main task</button></div></div>`
     }
@@ -1198,6 +1201,7 @@ document.addEventListener("click", async (event) => {
   if (action === "filter-dnf") filterDnfNotes(target.dataset.topic);
   if (action === "toggle-main-task") toggleMainTask(targetId);
   if (action === "sort-main-tasks-name") await run(() => store.sortMainTasksByName(), "Main tasks sorted by name.");
+  if (action === "toggle-completed-main-tasks") toggleCompletedMainTasks();
   if (action === "collapse-all-tasks") setAllMainTasksCollapsed(true);
   if (action === "expand-all-tasks") setAllMainTasksCollapsed(false);
   if (action === "open-template-modal") showTemplateModal();
@@ -1240,6 +1244,12 @@ function toggleMainTask(mainTaskId) {
 
 function setAllMainTasksCollapsed(collapsed) {
   tasksUi.collapsedIds = collapsed ? state.mainTasks.map((mainTask) => mainTask.id) : [];
+  saveTasksUi();
+  renderTasks();
+}
+
+function toggleCompletedMainTasks() {
+  tasksUi.showCompleted = !tasksUi.showCompleted;
   saveTasksUi();
   renderTasks();
 }
