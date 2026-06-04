@@ -5,6 +5,8 @@ create table public.main_tasks (
   user_id uuid not null references auth.users(id) on delete cascade,
   title text not null,
   description text default '',
+  completed boolean not null default false,
+  sort_order integer not null default 0,
   created_at timestamptz not null default now()
 );
 
@@ -17,6 +19,7 @@ create table public.subtasks (
   estimated_minutes integer not null default 0 check (estimated_minutes >= 0),
   priority text not null default 'normal' check (priority in ('high', 'normal', 'low')),
   deadline date,
+  recurrence text not null default 'none' check (recurrence in ('none', 'daily')),
   created_at timestamptz not null default now()
 );
 
@@ -29,6 +32,7 @@ create table public.step_items (
   estimated_minutes integer not null default 0 check (estimated_minutes >= 0),
   priority text not null default 'normal' check (priority in ('high', 'normal', 'low')),
   deadline date,
+  recurrence text not null default 'none' check (recurrence in ('none', 'daily')),
   created_at timestamptz not null default now()
 );
 

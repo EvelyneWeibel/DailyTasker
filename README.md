@@ -13,6 +13,8 @@ history so recurring blockers are easy to remember.
 
 Steps and nested subtasks can have a priority and deadline. The Today page sorts unfinished
 deadline items by due date and lets you add them to today's list in one click.
+Main tasks can be reordered, sorted by name, completed in one action, and expanded or reduced.
+Steps and nested subtasks can recur daily, be promoted or demoted, and be moved to tomorrow.
 
 ## Preview locally
 
@@ -58,6 +60,9 @@ Run `migrations/20260601_add_dnf_notes.sql` once to add the topic-filtered DNF j
 
 Run `migrations/20260601_add_priority_and_deadlines.sql` once to add priority and deadline
 metadata for steps and nested subtasks.
+
+Run `migrations/20260604_add_task_management_upgrade.sql` once to add task ordering,
+main-task completion, and daily recurrence.
 
 ## Publish with GitHub Pages
 

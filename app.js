@@ -20,6 +20,7 @@ let state = {
   mainTasks: [],
   templates: [],
   dailyTasks: [],
+  yesterdayTasks: [],
   dnfNotes: [],
 };
 let pomodoro = loadPomodoro();
@@ -46,6 +47,12 @@ const normalizeSupabaseUrl = (value) => {
 };
 const today = () => {
   const date = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+const dateOffset = (days) => {
+  const date = new Date(`${today()}T12:00:00`);
+  date.setDate(date.getDate() + days);
   const pad = (value) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 };
@@ -83,6 +90,7 @@ const priorityOrder = { high: 0, normal: 1, low: 2 };
 const priorityLabel = (priority = "normal") => `${priority.charAt(0).toUpperCase()}${priority.slice(1)} priority`;
 const priorityBadge = (priority = "normal") => `<span class="priority-badge ${priority}">${priorityLabel(priority)}</span>`;
 const deadlineBadge = (deadline) => deadline ? `<span class="deadline-badge">${deadlineLabel(deadline)}</span>` : "";
+const recurrenceBadge = (recurrence) => recurrence === "daily" ? `<span class="recurrence-badge">Daily</span>` : "";
 const daysUntil = (deadline) => {
   const dueDate = new Date(`${deadline}T12:00:00`);
   const currentDate = new Date(`${today()}T12:00:00`);
@@ -206,13 +214,15 @@ class SupabaseStore {
   }
 
   async load() {
-    const [mainTasks, templates, dailyTasks, dnfNotes] = await Promise.all([
-      this.client.from("main_tasks").select("id,title,description,subtasks(id,title,completed,estimated_minutes,priority,deadline,step_items(id,title,completed,estimated_minutes,priority,deadline))").order("created_at"),
+    await this.ensureRecurringDailyTasks();
+    const [mainTasks, templates, dailyTasks, yesterdayTasks, dnfNotes] = await Promise.all([
+      this.client.from("main_tasks").select("id,title,description,completed,sort_order,subtasks(id,main_task_id,title,completed,estimated_minutes,priority,deadline,recurrence,step_items(id,title,completed,estimated_minutes,priority,deadline,recurrence))").order("sort_order").order("created_at"),
       this.client.from("task_templates").select("id,title,description,template_subtasks(id,title)").order("created_at"),
       this.client.from("daily_tasks").select("id,subtask_id,step_item_id,task_date,sort_order").eq("task_date", today()).order("sort_order"),
+      this.client.from("daily_tasks").select("id,subtask_id,step_item_id,task_date,sort_order").eq("task_date", dateOffset(-1)).order("sort_order"),
       this.client.from("dnf_notes").select("id,topic,reason,task_title,task_source,task_date,created_at").order("created_at", { ascending: false }),
     ]);
-    [mainTasks, templates, dailyTasks, dnfNotes].forEach(({ error }) => {
+    [mainTasks, templates, dailyTasks, yesterdayTasks, dnfNotes].forEach(({ error }) => {
       if (error) throw error;
     });
     return {
@@ -223,11 +233,13 @@ class SupabaseStore {
           estimatedMinutes: subtask.estimated_minutes || 0,
           priority: subtask.priority || "normal",
           deadline: subtask.deadline || "",
+          recurrence: subtask.recurrence || "none",
           stepItems: (subtask.step_items || []).map((stepItem) => ({
             ...stepItem,
             estimatedMinutes: stepItem.estimated_minutes || 0,
             priority: stepItem.priority || "normal",
             deadline: stepItem.deadline || "",
+            recurrence: stepItem.recurrence || "none",
           })),
         })),
       })),
@@ -236,6 +248,13 @@ class SupabaseStore {
         subtasks: template.template_subtasks || [],
       })),
       dailyTasks: dailyTasks.data.map((task) => ({
+        id: task.id,
+        subtaskId: task.subtask_id,
+        stepItemId: task.step_item_id,
+        taskDate: task.task_date,
+        sortOrder: task.sort_order,
+      })),
+      yesterdayTasks: yesterdayTasks.data.map((task) => ({
         id: task.id,
         subtaskId: task.subtask_id,
         stepItemId: task.step_item_id,
@@ -254,11 +273,34 @@ class SupabaseStore {
     };
   }
 
+  async ensureRecurringDailyTasks() {
+    const userId = await this.userId();
+    const [subtasks, stepItems, dailyTasks] = await Promise.all([
+      this.client.from("subtasks").select("id").eq("recurrence", "daily").eq("completed", false),
+      this.client.from("step_items").select("id").eq("recurrence", "daily").eq("completed", false),
+      this.client.from("daily_tasks").select("subtask_id,step_item_id").eq("task_date", today()),
+    ]);
+    [subtasks, stepItems, dailyTasks].forEach(({ error }) => {
+      if (error) throw error;
+    });
+    const existingSubtasks = new Set(dailyTasks.data.map((item) => item.subtask_id).filter(Boolean));
+    const existingStepItems = new Set(dailyTasks.data.map((item) => item.step_item_id).filter(Boolean));
+    const inserts = [
+      ...subtasks.data.filter((item) => !existingSubtasks.has(item.id)).map((item, index) => ({ user_id: userId, subtask_id: item.id, task_date: today(), sort_order: index })),
+      ...stepItems.data.filter((item) => !existingStepItems.has(item.id)).map((item, index) => ({ user_id: userId, step_item_id: item.id, task_date: today(), sort_order: subtasks.data.length + index })),
+    ];
+    if (inserts.length) {
+      const { error } = await this.client.from("daily_tasks").insert(inserts);
+      if (error) throw error;
+    }
+  }
+
   async createMainTask(payload) {
     const userId = await this.userId();
+    const sortOrder = Math.max(-1, ...state.mainTasks.map((task) => task.sortOrder ?? 0)) + 1;
     const { data, error } = await this.client
       .from("main_tasks")
-      .insert({ user_id: userId, title: payload.title, description: payload.description })
+      .insert({ user_id: userId, title: payload.title, description: payload.description, sort_order: sortOrder })
       .select("id")
       .single();
     if (error) throw error;
@@ -272,7 +314,7 @@ class SupabaseStore {
     }
   }
 
-  async createSubtask(mainTaskId, title, estimatedMinutesValue, priority = "normal", deadline = "") {
+  async createSubtask(mainTaskId, title, estimatedMinutesValue, priority = "normal", deadline = "", recurrence = "none") {
     const { error } = await this.client.from("subtasks").insert({
       user_id: await this.userId(),
       main_task_id: mainTaskId,
@@ -280,6 +322,7 @@ class SupabaseStore {
       estimated_minutes: estimatedMinutes(estimatedMinutesValue),
       priority,
       deadline: deadline || null,
+      recurrence,
     });
     if (error) throw error;
   }
@@ -289,7 +332,7 @@ class SupabaseStore {
     if (error) throw error;
   }
 
-  async createStepItem(subtaskId, title, estimatedMinutesValue, priority = "normal", deadline = "") {
+  async createStepItem(subtaskId, title, estimatedMinutesValue, priority = "normal", deadline = "", recurrence = "none") {
     const { error } = await this.client.from("step_items").insert({
       user_id: await this.userId(),
       subtask_id: subtaskId,
@@ -297,6 +340,7 @@ class SupabaseStore {
       estimated_minutes: estimatedMinutes(estimatedMinutesValue),
       priority,
       deadline: deadline || null,
+      recurrence,
     });
     if (error) throw error;
   }
@@ -312,6 +356,7 @@ class SupabaseStore {
       estimated_minutes: estimatedMinutes(payload.estimatedMinutes),
       priority: payload.priority,
       deadline: payload.deadline || null,
+      recurrence: payload.recurrence || "none",
     }).eq("id", targetId);
     if (error) throw error;
   }
@@ -319,6 +364,32 @@ class SupabaseStore {
   async deleteMainTask(mainTaskId) {
     const { error } = await this.client.from("main_tasks").delete().eq("id", mainTaskId);
     if (error) throw error;
+  }
+
+  async deleteSubtask(subtaskId) {
+    const { error } = await this.client.from("subtasks").delete().eq("id", subtaskId);
+    if (error) throw error;
+  }
+
+  async deleteStepItem(stepItemId) {
+    const { error } = await this.client.from("step_items").delete().eq("id", stepItemId);
+    if (error) throw error;
+  }
+
+  async toggleMainTask(mainTaskId, completed) {
+    const mainTask = state.mainTasks.find((item) => item.id === mainTaskId);
+    const subtaskIds = mainTask.subtasks.map((item) => item.id);
+    const stepItemIds = mainTask.subtasks.flatMap((item) => item.stepItems || []).map((item) => item.id);
+    const { error } = await this.client.from("main_tasks").update({ completed }).eq("id", mainTaskId);
+    if (error) throw error;
+    if (subtaskIds.length) {
+      const { error: subtaskError } = await this.client.from("subtasks").update({ completed }).in("id", subtaskIds);
+      if (subtaskError) throw subtaskError;
+    }
+    if (stepItemIds.length) {
+      const { error: stepItemError } = await this.client.from("step_items").update({ completed }).in("id", stepItemIds);
+      if (stepItemError) throw stepItemError;
+    }
   }
 
   async createTemplate(payload) {
@@ -342,9 +413,13 @@ class SupabaseStore {
   }
 
   async addDailyTask(targetType, targetId) {
+    return this.addDailyTaskForDate(targetType, targetId, today());
+  }
+
+  async addDailyTaskForDate(targetType, targetId, taskDate) {
     const payload = {
       user_id: await this.userId(),
-      task_date: today(),
+      task_date: taskDate,
       sort_order: Math.max(-1, ...state.dailyTasks.map((item) => item.sortOrder ?? 0)) + 1,
     };
     payload[targetType === "step-item" ? "step_item_id" : "subtask_id"] = targetId;
@@ -357,11 +432,62 @@ class SupabaseStore {
     if (error) throw error;
   }
 
+  async moveDailyTaskToTomorrow(dailyTaskId) {
+    const { error } = await this.client.from("daily_tasks").update({ task_date: dateOffset(1), sort_order: 0 }).eq("id", dailyTaskId);
+    if (error) throw error;
+  }
+
   async reorderDailyTasks(orderedIds) {
     for (const [index, dailyTaskId] of orderedIds.entries()) {
       const { error } = await this.client.from("daily_tasks").update({ sort_order: index }).eq("id", dailyTaskId);
       if (error) throw error;
     }
+  }
+
+  async reorderMainTasks(orderedIds) {
+    for (const [index, mainTaskId] of orderedIds.entries()) {
+      const { error } = await this.client.from("main_tasks").update({ sort_order: index }).eq("id", mainTaskId);
+      if (error) throw error;
+    }
+  }
+
+  async sortMainTasksByName() {
+    await this.reorderMainTasks(state.mainTasks.slice().sort((a, b) => a.title.localeCompare(b.title)).map((item) => item.id));
+  }
+
+  async promoteStepItem(stepItemId) {
+    const { stepItem, subtask } = findStepItem(stepItemId);
+    const { error } = await this.client.from("subtasks").insert({
+      user_id: await this.userId(),
+      main_task_id: subtask.main_task_id,
+      title: stepItem.title,
+      completed: stepItem.completed,
+      estimated_minutes: stepItem.estimatedMinutes,
+      priority: stepItem.priority,
+      deadline: stepItem.deadline || null,
+      recurrence: stepItem.recurrence || "none",
+    });
+    if (error) throw error;
+    await this.deleteStepItem(stepItemId);
+  }
+
+  async demoteSubtask(subtaskId) {
+    const { subtask, mainTask } = findSubtask(subtaskId);
+    const index = mainTask.subtasks.findIndex((item) => item.id === subtaskId);
+    const parent = mainTask.subtasks[index - 1];
+    if (!parent) throw new Error("Move this step below another step before demoting it.");
+    const { error } = await this.client.from("step_items").insert({
+      user_id: await this.userId(),
+      subtask_id: parent.id,
+      title: subtask.title,
+      completed: subtask.completed,
+      estimated_minutes: subtask.estimatedMinutes,
+      priority: subtask.priority,
+      deadline: subtask.deadline || null,
+      recurrence: subtask.recurrence || "none",
+    });
+    if (error) throw error;
+    await this.deleteSubtask(subtaskId);
   }
 
   async createDnfNote(payload) {
@@ -430,6 +556,7 @@ function metadataBadges(target, targetType, targetId) {
       ${durationBadge(target.estimatedMinutes, targetType, targetId)}
       ${priorityBadge(target.priority)}
       ${deadlineBadge(target.deadline)}
+      ${recurrenceBadge(target.recurrence)}
     </div>
   `;
 }
@@ -451,6 +578,8 @@ function renderTaskRow(subtask, mainTask, options = {}) {
           ${metadataBadges(subtask, "subtask", subtask.id)}
         </div>
         ${action}
+        <button class="button button-small button-quiet" type="button" data-action="demote-subtask" data-id="${subtask.id}">Demote</button>
+        <button class="icon-button" type="button" data-action="delete-subtask" data-id="${subtask.id}" aria-label="Delete ${escapeHtml(subtask.title)}">×</button>
       </div>
       ${stepItems.length ? `<div class="step-item-list">${(showAllStepItems ? stepItems : visibleStepItems).map((stepItem) => renderStepItem(stepItem, options.query)).join("")}</div>` : ""}
       <button class="add-step-item" type="button" data-action="open-step-item-modal" data-id="${subtask.id}">+ Add subtask</button>
@@ -466,6 +595,8 @@ function renderStepItem(stepItem, query = "") {
       <span class="step-item-title">${highlightText(stepItem.title, query)}</span>
       ${metadataBadges(stepItem, "step-item", stepItem.id)}
       <button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-target-type="step-item" data-id="${stepItem.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>
+      <button class="button button-small button-quiet" type="button" data-action="promote-step-item" data-id="${stepItem.id}">Promote</button>
+      <button class="icon-button" type="button" data-action="delete-step-item" data-id="${stepItem.id}" aria-label="Delete ${escapeHtml(stepItem.title)}">×</button>
     </div>
   `;
 }
@@ -500,7 +631,9 @@ function renderPomodoro() {
 
 function renderToday() {
   const dailyItems = state.dailyTasks.map(resolveDailyTask).filter(Boolean).sort((a, b) => a.dailyTask.sortOrder - b.dailyTask.sortOrder);
-  const completed = dailyItems.filter(({ target }) => target.completed).length;
+  const activeDailyItems = dailyItems.filter(({ target }) => !target.completed);
+  const completedDailyItems = dailyItems.filter(({ target }) => target.completed);
+  const completed = completedDailyItems.length;
   const totalMinutes = dailyItems.reduce((total, { target }) => total + estimatedMinutes(target.estimatedMinutes), 0);
   const progress = dailyItems.length ? Math.round((completed / dailyItems.length) * 100) : 0;
   const date = new Date();
@@ -514,7 +647,9 @@ function renderToday() {
       <div class="date-card"><strong>${date.getDate()}</strong><span>${date.toLocaleDateString(undefined, { month: "short" })}</span></div>
     </section>
     ${renderPomodoro()}
+    ${renderTodaySummary(dailyItems)}
     ${renderUpcomingDeadlines()}
+    ${renderYesterdaySuggestions()}
     <section class="section">
       <div class="section-heading">
         <div>
@@ -527,7 +662,8 @@ function renderToday() {
         dailyItems.length
           ? `<div class="card">
               <div class="progress-line"><div class="progress-track"><div class="progress-bar" style="width:${progress}%"></div></div><span>${progress}%</span></div>
-              <div class="task-list">${dailyItems.map((item, index) => renderDailyRow(item, index, dailyItems.length)).join("")}</div>
+              <div class="task-list">${activeDailyItems.map((item, index) => renderDailyRow(item, index, dailyItems.length)).join("")}</div>
+              ${completedDailyItems.length ? `<details class="completed-group"><summary>${completedDailyItems.length} completed ${completedDailyItems.length === 1 ? "task" : "tasks"}</summary><div class="task-list">${completedDailyItems.map((item, index) => renderDailyRow(item, index, dailyItems.length)).join("")}</div></details>` : ""}
             </div>`
           : `<div class="empty-state">
               <h2>Start with one small thing</h2>
@@ -537,6 +673,18 @@ function renderToday() {
       }
     </section>
     ${renderDnfJournal()}
+  `;
+}
+
+function renderTodaySummary(dailyItems) {
+  const completedItems = dailyItems.filter(({ target }) => target.completed);
+  const completedMinutes = completedItems.reduce((total, { target }) => total + estimatedMinutes(target.estimatedMinutes), 0);
+  return `
+    <section class="summary-strip">
+      <div><strong>${completedItems.length}</strong><span>done today</span></div>
+      <div><strong>${durationLabel(completedMinutes)}</strong><span>completed time</span></div>
+      <div><strong>${dailyItems.length - completedItems.length}</strong><span>left today</span></div>
+    </section>
   `;
 }
 
@@ -555,8 +703,45 @@ function renderDailyRow({ dailyTask, target, parentStep, mainTask, targetType },
         <button class="order-button" type="button" data-action="move-daily" data-direction="1" data-id="${dailyTask.id}" ${index === total - 1 ? "disabled" : ""} aria-label="Move ${escapeHtml(target.title)} down">↓</button>
       </div>
       <button class="button button-small button-quiet dnf-button" type="button" data-action="open-dnf-modal" data-id="${dailyTask.id}">DNF</button>
+      <button class="button button-small button-quiet" type="button" data-action="do-tomorrow" data-id="${dailyTask.id}">Tomorrow</button>
       <button class="icon-button" type="button" data-action="remove-daily" data-id="${dailyTask.id}" aria-label="Remove ${escapeHtml(target.title)} from today">×</button>
     </div>
+  `;
+}
+
+function renderYesterdaySuggestions() {
+  const suggestions = state.yesterdayTasks
+    .map(resolveDailyTask)
+    .filter(Boolean)
+    .filter(({ target }) => !target.completed && !state.dailyTasks.some((item) => item.subtaskId === target.id || item.stepItemId === target.id));
+  return `
+    <section class="section">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Carry forward</p>
+          <h2>Unfinished from yesterday</h2>
+          <p>Pick up what did not get finished, or leave it behind.</p>
+        </div>
+      </div>
+      ${
+        suggestions.length
+          ? `<div class="deadline-list">${suggestions.map(renderYesterdaySuggestion).join("")}</div>`
+          : `<div class="empty-state compact-empty"><h3>No unfinished tasks from yesterday</h3><p>Clean slate. Very civilized.</p></div>`
+      }
+    </section>
+  `;
+}
+
+function renderYesterdaySuggestion({ target, targetType, parentStep, mainTask }) {
+  return `
+    <article class="deadline-row">
+      <div class="deadline-task">
+        <h3>${escapeHtml(target.title)}</h3>
+        <p>${escapeHtml(dailyTaskSource({ targetType, parentStep, mainTask }))}</p>
+      </div>
+      ${metadataBadges(target, targetType, target.id)}
+      <button class="button button-small button-primary" type="button" data-action="add-daily" data-target-type="${targetType}" data-id="${target.id}">+ Today</button>
+    </article>
   `;
 }
 
@@ -668,6 +853,7 @@ function renderTasks() {
       </label>
       <div class="toolbar-actions">
         <span class="search-result-count" id="main-task-result-count">${matchingTasks.length} of ${state.mainTasks.length} shown</span>
+        <button class="button button-quiet button-small" type="button" data-action="sort-main-tasks-name">Sort by name</button>
         <button class="button button-quiet button-small" type="button" data-action="collapse-all-tasks">Reduce all</button>
         <button class="button button-quiet button-small" type="button" data-action="expand-all-tasks">Expand all</button>
       </div>
@@ -701,8 +887,9 @@ function renderMainTaskCard(mainTask, query = "") {
   const visibleSubtasks = query ? mainTask.subtasks.filter((subtask) => subtaskMatchesQuery(subtask, query)) : mainTask.subtasks;
   const matchedProject = query && `${mainTask.title} ${mainTask.description}`.toLowerCase().includes(query);
   return `
-    <article class="card main-task-card ${collapsed ? "collapsed" : ""} ${hidden ? "search-hidden" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}">
+    <article class="card main-task-card ${collapsed ? "collapsed" : ""} ${hidden ? "search-hidden" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}" data-id="${mainTask.id}" draggable="true">
       <header class="card-header">
+        <input type="checkbox" data-action="toggle-main-task-complete" data-id="${mainTask.id}" ${mainTask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(mainTask.title)} complete" />
         <div>
           <h3>${highlightText(mainTask.title, query)}</h3>
           <p>${highlightText(mainTask.description || `${mainTask.subtasks.length} small steps`, query)}</p>
@@ -798,6 +985,7 @@ function showSubtaskModal(mainTaskId) {
       <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="15" /></label>
       <label>Priority<select name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label>
       <label>Deadline<input name="deadline" type="date" /></label>
+      <label>Recurring<select name="recurrence"><option value="none">Not recurring</option><option value="daily">Every day</option></select></label>
       <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Add step</button></div>
     </form>
   `);
@@ -812,6 +1000,7 @@ function showStepItemModal(subtaskId) {
       <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="10" /></label>
       <label>Priority<select name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label>
       <label>Deadline<input name="deadline" type="date" /></label>
+      <label>Recurring<select name="recurrence"><option value="none">Not recurring</option><option value="daily">Every day</option></select></label>
       <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Add subtask</button></div>
     </form>
   `);
@@ -825,6 +1014,7 @@ function showTaskDetailsModal(targetType, targetId) {
       <label>Estimated duration in minutes<input name="estimatedMinutes" type="number" min="0" step="5" value="${estimatedMinutes(target.estimatedMinutes)}" autofocus /></label>
       <label>Priority<select name="priority"><option value="normal" ${target.priority === "normal" ? "selected" : ""}>Normal</option><option value="high" ${target.priority === "high" ? "selected" : ""}>High</option><option value="low" ${target.priority === "low" ? "selected" : ""}>Low</option></select></label>
       <label>Deadline<input name="deadline" type="date" value="${escapeHtml(target.deadline || "")}" /></label>
+      <label>Recurring<select name="recurrence"><option value="none" ${target.recurrence !== "daily" ? "selected" : ""}>Not recurring</option><option value="daily" ${target.recurrence === "daily" ? "selected" : ""}>Every day</option></select></label>
       <div class="dialog-actions"><button class="button button-quiet" type="button" data-action="close-modal">Cancel</button><button class="button button-primary">Save details</button></div>
     </form>
   `);
@@ -952,11 +1142,11 @@ document.addEventListener("submit", async (event) => {
     closeModal();
   }
   if (event.target.id === "subtask-form") {
-    await run(() => store.createSubtask(event.target.dataset.id, data.title, data.estimatedMinutes, data.priority, data.deadline), "Small step added.");
+    await run(() => store.createSubtask(event.target.dataset.id, data.title, data.estimatedMinutes, data.priority, data.deadline, data.recurrence), "Small step added.");
     closeModal();
   }
   if (event.target.id === "step-item-form") {
-    await run(() => store.createStepItem(event.target.dataset.id, data.title, data.estimatedMinutes, data.priority, data.deadline), "Subtask added.");
+    await run(() => store.createStepItem(event.target.dataset.id, data.title, data.estimatedMinutes, data.priority, data.deadline, data.recurrence), "Subtask added.");
     closeModal();
   }
   if (event.target.id === "task-details-form") {
@@ -1007,6 +1197,7 @@ document.addEventListener("click", async (event) => {
   if (action === "delete-dnf-note" && confirm("Delete this DNF note?")) await run(() => store.deleteDnfNote(targetId), "DNF note deleted.");
   if (action === "filter-dnf") filterDnfNotes(target.dataset.topic);
   if (action === "toggle-main-task") toggleMainTask(targetId);
+  if (action === "sort-main-tasks-name") await run(() => store.sortMainTasksByName(), "Main tasks sorted by name.");
   if (action === "collapse-all-tasks") setAllMainTasksCollapsed(true);
   if (action === "expand-all-tasks") setAllMainTasksCollapsed(false);
   if (action === "open-template-modal") showTemplateModal();
@@ -1014,9 +1205,14 @@ document.addEventListener("click", async (event) => {
   if (action === "use-template") showMainTaskModal(targetId);
   if (action === "add-daily") await run(() => store.addDailyTask(target.dataset.targetType, targetId), "Added to today's list.");
   if (action === "remove-daily") await run(() => store.removeDailyTask(targetId), "Removed from today's list.");
+  if (action === "do-tomorrow") await run(() => store.moveDailyTaskToTomorrow(targetId), "Moved to tomorrow.");
   if (action === "move-daily") await run(() => reorderDailyTask(targetId, Number(target.dataset.direction)));
   if (action === "sort-duration") await run(sortDailyTasksByDuration, "Today's list sorted by duration.");
   if (action === "delete-main-task" && confirm("Delete this main task and its small steps?")) await run(() => store.deleteMainTask(targetId), "Main task deleted.");
+  if (action === "delete-subtask" && confirm("Delete this step and its nested subtasks?")) await run(() => store.deleteSubtask(targetId), "Step deleted.");
+  if (action === "delete-step-item" && confirm("Delete this subtask?")) await run(() => store.deleteStepItem(targetId), "Subtask deleted.");
+  if (action === "promote-step-item") await run(() => store.promoteStepItem(targetId), "Subtask promoted to step.");
+  if (action === "demote-subtask") await run(() => store.demoteSubtask(targetId), "Step demoted to subtask.");
   if (action === "delete-template" && confirm("Delete this template?")) await run(() => store.deleteTemplate(targetId), "Template deleted.");
 });
 
@@ -1067,9 +1263,45 @@ document.addEventListener("change", async (event) => {
   if (event.target.dataset.action === "toggle-subtask") {
     await run(() => store.toggleSubtask(event.target.dataset.id, event.target.checked), event.target.checked ? "Nice work. One step done." : "Step reopened.");
   }
+  if (event.target.dataset.action === "toggle-main-task-complete") {
+    await run(() => store.toggleMainTask(event.target.dataset.id, event.target.checked), event.target.checked ? "Main task completed." : "Main task reopened.");
+  }
   if (event.target.dataset.action === "toggle-step-item") {
     await run(() => store.toggleStepItem(event.target.dataset.id, event.target.checked), event.target.checked ? "Subtask complete." : "Subtask reopened.");
   }
+});
+
+document.addEventListener("dragstart", (event) => {
+  const card = event.target.closest(".main-task-card");
+  if (!card) return;
+  event.dataTransfer.setData("text/plain", card.dataset.id);
+  card.classList.add("dragging");
+});
+
+document.addEventListener("dragend", (event) => {
+  event.target.closest(".main-task-card")?.classList.remove("dragging");
+});
+
+document.addEventListener("dragover", (event) => {
+  const list = event.target.closest("#main-task-grid");
+  const overCard = event.target.closest(".main-task-card");
+  if (!list || !overCard) return;
+  event.preventDefault();
+});
+
+document.addEventListener("drop", async (event) => {
+  const list = event.target.closest("#main-task-grid");
+  const overCard = event.target.closest(".main-task-card");
+  if (!list || !overCard) return;
+  event.preventDefault();
+  const draggedId = event.dataTransfer.getData("text/plain");
+  const overId = overCard.dataset.id;
+  if (!draggedId || draggedId === overId) return;
+  const orderedIds = state.mainTasks.map((item) => item.id);
+  const from = orderedIds.indexOf(draggedId);
+  const to = orderedIds.indexOf(overId);
+  orderedIds.splice(to, 0, orderedIds.splice(from, 1)[0]);
+  await run(() => store.reorderMainTasks(orderedIds), "Main tasks reordered.");
 });
 
 window.addEventListener("hashchange", render);
