@@ -888,9 +888,9 @@ function renderMainTaskCard(mainTask, query = "") {
   const matchedProject = query && `${mainTask.title} ${mainTask.description}`.toLowerCase().includes(query);
   return `
     <article class="card main-task-card ${collapsed ? "collapsed" : ""} ${hidden ? "search-hidden" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}" data-id="${mainTask.id}" draggable="true">
-      <header class="card-header">
-        <input type="checkbox" data-action="toggle-main-task-complete" data-id="${mainTask.id}" ${mainTask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(mainTask.title)} complete" />
-        <div>
+      <header class="card-header main-task-header">
+        <input class="main-task-checkbox" type="checkbox" data-action="toggle-main-task-complete" data-id="${mainTask.id}" ${mainTask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(mainTask.title)} complete" />
+        <div class="main-task-title-block">
           <h3>${highlightText(mainTask.title, query)}</h3>
           <p>${highlightText(mainTask.description || `${mainTask.subtasks.length} small steps`, query)}</p>
           ${query ? `<span class="match-summary">${matchedProject ? "Project match" : `${visibleSubtasks.length} matching ${visibleSubtasks.length === 1 ? "step" : "steps"}`}</span>` : ""}

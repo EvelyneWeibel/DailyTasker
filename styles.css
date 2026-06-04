@@ -417,6 +417,28 @@ h3 {
   margin-bottom: 14px;
 }
 
+.main-task-header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.main-task-checkbox {
+  width: 18px;
+  height: 18px;
+  margin-top: 4px;
+  accent-color: var(--sage);
+}
+
+.main-task-title-block {
+  min-width: 0;
+}
+
+.main-task-title-block h3 {
+  margin-bottom: 5px;
+}
+
 .collapse-button {
   display: grid;
   flex: 0 0 auto;
