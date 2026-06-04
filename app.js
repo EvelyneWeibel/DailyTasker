@@ -836,7 +836,7 @@ function renderDnfNote(note) {
 
 function renderTasks() {
   const query = tasksUi.query.trim().toLowerCase();
-  const visibleMainTasks = state.mainTasks.filter((mainTask) => tasksUi.showCompleted || !mainTask.completed);
+  const visibleMainTasks = state.mainTasks.filter((mainTask) => tasksUi.showCompleted || !isMainTaskComplete(mainTask));
   const matchingTasks = visibleMainTasks.filter((mainTask) => mainTaskMatchesQuery(mainTask, query));
   const hiddenCompleted = state.mainTasks.length - visibleMainTasks.length;
   app.innerHTML = `
@@ -884,7 +884,8 @@ function mainTaskSearchText(mainTask) {
 }
 
 function renderMainTaskCard(mainTask, query = "") {
-  const completed = mainTask.subtasks.filter((item) => item.completed).length;
+  const completed = countCompletedSubtasks(mainTask);
+  const mainTaskComplete = isMainTaskComplete(mainTask);
   const collapsed = !query && tasksUi.collapsedIds.includes(mainTask.id);
   const hidden = !mainTaskMatchesQuery(mainTask, query);
   const visibleSubtasks = query ? mainTask.subtasks.filter((subtask) => subtaskMatchesQuery(subtask, query)) : mainTask.subtasks;
@@ -892,7 +893,7 @@ function renderMainTaskCard(mainTask, query = "") {
   return `
     <article class="card main-task-card ${collapsed ? "collapsed" : ""} ${hidden ? "search-hidden" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}" data-id="${mainTask.id}" draggable="true">
       <header class="card-header main-task-header">
-        <input class="main-task-checkbox" type="checkbox" data-action="toggle-main-task-complete" data-id="${mainTask.id}" ${mainTask.completed ? "checked" : ""} aria-label="Mark ${escapeHtml(mainTask.title)} complete" />
+        <input class="main-task-checkbox" type="checkbox" data-action="toggle-main-task-complete" data-id="${mainTask.id}" ${mainTaskComplete ? "checked" : ""} aria-label="Mark ${escapeHtml(mainTask.title)} complete" />
         <div class="main-task-title-block">
           <h3>${highlightText(mainTask.title, query)}</h3>
           <p>${highlightText(mainTask.description || `${mainTask.subtasks.length} small steps`, query)}</p>
@@ -910,6 +911,14 @@ function renderMainTaskCard(mainTask, query = "") {
       </div>
     </article>
   `;
+}
+
+function countCompletedSubtasks(mainTask) {
+  return mainTask.subtasks.filter((subtask) => subtask.completed && (subtask.stepItems || []).every((stepItem) => stepItem.completed)).length;
+}
+
+function isMainTaskComplete(mainTask) {
+  return Boolean(mainTask.completed || (mainTask.subtasks.length && countCompletedSubtasks(mainTask) === mainTask.subtasks.length));
 }
 
 function subtaskMatchesQuery(subtask, query) {
@@ -1252,6 +1261,7 @@ function toggleCompletedMainTasks() {
   tasksUi.showCompleted = !tasksUi.showCompleted;
   saveTasksUi();
   renderTasks();
+  showToast(tasksUi.showCompleted ? "Completed main tasks shown." : "Completed main tasks hidden.");
 }
 
 function filterMainTaskCards() {
