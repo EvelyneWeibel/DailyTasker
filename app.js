@@ -564,9 +564,10 @@ function metadataBadges(target, targetType, targetId) {
 function renderTaskRow(subtask, mainTask, options = {}) {
   const dailyTask = state.dailyTasks.find((item) => item.subtaskId === subtask.id);
   const stepItems = subtask.stepItems || [];
+  const visibleBaseStepItems = tasksUi.showCompleted ? stepItems : stepItems.filter((stepItem) => !stepItem.completed);
   const visibleStepItems = options.query
-    ? stepItems.filter((stepItem) => stepItem.title.toLowerCase().includes(options.query))
-    : stepItems;
+    ? visibleBaseStepItems.filter((stepItem) => stepItem.title.toLowerCase().includes(options.query))
+    : visibleBaseStepItems;
   const showAllStepItems = !options.query || subtask.title.toLowerCase().includes(options.query);
   const action = `<button class="button button-small ${dailyTask ? "button-quiet" : "button-primary"}" type="button" data-action="add-daily" data-target-type="subtask" data-id="${subtask.id}" ${dailyTask ? "disabled" : ""}>${dailyTask ? "Added" : "+ Today"}</button>`;
   return `
@@ -581,7 +582,7 @@ function renderTaskRow(subtask, mainTask, options = {}) {
         <button class="button button-small button-quiet" type="button" data-action="demote-subtask" data-id="${subtask.id}">Demote</button>
         <button class="icon-button" type="button" data-action="delete-subtask" data-id="${subtask.id}" aria-label="Delete ${escapeHtml(subtask.title)}">×</button>
       </div>
-      ${stepItems.length ? `<div class="step-item-list">${(showAllStepItems ? stepItems : visibleStepItems).map((stepItem) => renderStepItem(stepItem, options.query)).join("")}</div>` : ""}
+      ${visibleBaseStepItems.length ? `<div class="step-item-list">${(showAllStepItems ? visibleBaseStepItems : visibleStepItems).map((stepItem) => renderStepItem(stepItem, options.query)).join("")}</div>` : ""}
       <button class="add-step-item" type="button" data-action="open-step-item-modal" data-id="${subtask.id}">+ Add subtask</button>
     </div>
   `;
@@ -888,8 +889,10 @@ function renderMainTaskCard(mainTask, query = "") {
   const mainTaskComplete = isMainTaskComplete(mainTask);
   const collapsed = !query && tasksUi.collapsedIds.includes(mainTask.id);
   const hidden = !mainTaskMatchesQuery(mainTask, query);
-  const visibleSubtasks = query ? mainTask.subtasks.filter((subtask) => subtaskMatchesQuery(subtask, query)) : mainTask.subtasks;
+  const baseSubtasks = tasksUi.showCompleted ? mainTask.subtasks : mainTask.subtasks.filter((subtask) => !isSubtaskComplete(subtask));
+  const visibleSubtasks = query ? baseSubtasks.filter((subtask) => subtaskMatchesQuery(subtask, query)) : baseSubtasks;
   const matchedProject = query && `${mainTask.title} ${mainTask.description}`.toLowerCase().includes(query);
+  const hiddenChildren = mainTask.subtasks.length - baseSubtasks.length;
   return `
     <article class="card main-task-card ${collapsed ? "collapsed" : ""} ${hidden ? "search-hidden" : ""}" data-search="${escapeHtml(mainTaskSearchText(mainTask))}" data-id="${mainTask.id}" draggable="true">
       <header class="card-header main-task-header">
@@ -898,10 +901,11 @@ function renderMainTaskCard(mainTask, query = "") {
           <h3>${highlightText(mainTask.title, query)}</h3>
           <p>${highlightText(mainTask.description || `${mainTask.subtasks.length} small steps`, query)}</p>
           ${query ? `<span class="match-summary">${matchedProject ? "Project match" : `${visibleSubtasks.length} matching ${visibleSubtasks.length === 1 ? "step" : "steps"}`}</span>` : ""}
+          ${hiddenChildren && !tasksUi.showCompleted ? `<span class="match-summary">${hiddenChildren} completed hidden</span>` : ""}
         </div>
         <button class="collapse-button" type="button" data-action="toggle-main-task" data-id="${mainTask.id}" aria-expanded="${!collapsed}" aria-label="${collapsed ? "Expand" : "Reduce"} ${escapeHtml(mainTask.title)}">${collapsed ? "+" : "−"}</button>
       </header>
-      <div class="task-list main-task-details">${(query && !matchedProject ? visibleSubtasks : mainTask.subtasks).map((subtask) => renderTaskRow(subtask, mainTask, { query })).join("")}</div>
+      <div class="task-list main-task-details">${(query && !matchedProject ? visibleSubtasks : baseSubtasks).map((subtask) => renderTaskRow(subtask, mainTask, { query })).join("")}</div>
       <div class="card-actions">
         <span class="card-meta">${completed}/${mainTask.subtasks.length} done</span>
         <div class="main-task-details">
@@ -914,7 +918,11 @@ function renderMainTaskCard(mainTask, query = "") {
 }
 
 function countCompletedSubtasks(mainTask) {
-  return mainTask.subtasks.filter((subtask) => subtask.completed && (subtask.stepItems || []).every((stepItem) => stepItem.completed)).length;
+  return mainTask.subtasks.filter(isSubtaskComplete).length;
+}
+
+function isSubtaskComplete(subtask) {
+  return Boolean(subtask.completed && (subtask.stepItems || []).every((stepItem) => stepItem.completed));
 }
 
 function isMainTaskComplete(mainTask) {
